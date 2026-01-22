@@ -1,0 +1,27 @@
+# Telegram Bot Framework - CORRECT package name
+python-telegram-bot==20.7
+
+# Exchange APIs (REST API via CCXT)
+ccxt==4.2.25
+
+# Database - BINARY version (no gcc needed)
+psycopg2-binary==2.9.9
+SQLAlchemy==2.0.25
+
+# Async PostgreSQL (optional)
+asyncpg==0.29.0
+
+# Task Scheduling
+APScheduler==3.10.4
+
+# Environment Variables
+python-dotenv==1.0.0
+
+# Data Processing
+pandas==2.1.4
+
+# HTTP Requests
+requests==2.31.0
+
+# Retry Logic
+tenacity==8.2.3
