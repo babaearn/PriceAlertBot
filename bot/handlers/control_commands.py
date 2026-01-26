@@ -5,13 +5,16 @@ Control Command Handlers
 /pause - Pause price scanner
 /resume - Resume price scanner
 /status - Check scanner status
+/test - Health check for all services
 """
 
 import logging
+import time
 from telegram import Update
 from telegram.ext import ContextTypes
 from bot.utils.validators import is_admin
-from bot.services.database import set_config_value, get_config_value
+from bot.services.database import set_config_value, get_config_value, get_connection, get_active_pairs
+from bot.services.price_fetcher import PriceFetcher
 
 logger = logging.getLogger(__name__)
 
@@ -49,6 +52,7 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
 /status - Check scanner status
 /stats - View statistics
 /listpairs - Show all monitored pairs
+/test - Health check all services
 """
 
     if is_user_admin:
@@ -134,6 +138,120 @@ Scan Count: #{status['scan_count']}
 Interval: {status['scan_interval']}s
 
 Last Updated: {get_config_value('updated_at', 'N/A')}
+"""
+
+    await update.message.reply_text(message.strip(), parse_mode='HTML')
+
+
+async def test_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """
+    Health check - Tests all API functions and services
+    Shows results for: Database, Bybit API, Binance API, Telegram
+    """
+    await update.message.reply_text("🔄 <b>Running health checks...</b>", parse_mode='HTML')
+
+    results = []
+    total_start = time.time()
+
+    # ========== 1. DATABASE TEST ==========
+    db_status = "❌ Failed"
+    db_time = 0
+    db_details = ""
+    try:
+        start = time.time()
+        conn = get_connection()
+        conn.close()
+        db_time = (time.time() - start) * 1000  # ms
+
+        # Get active pairs count
+        pairs = get_active_pairs()
+        db_status = "✅ Connected"
+        db_details = f"({len(pairs)} active pairs)"
+    except Exception as e:
+        db_status = "❌ Failed"
+        db_details = f"({str(e)[:50]})"
+
+    results.append(f"<b>1. Database</b>\n   {db_status} {db_details}\n   ⏱ {db_time:.0f}ms")
+
+    # ========== 2. BYBIT API TEST ==========
+    bybit_status = "❌ Failed"
+    bybit_time = 0
+    bybit_details = ""
+    try:
+        start = time.time()
+        fetcher = PriceFetcher()
+        ticker = fetcher.bybit.fetch_ticker('BTC/USDT')
+        bybit_time = (time.time() - start) * 1000
+
+        if ticker and ticker.get('last'):
+            price = ticker['last']
+            bybit_status = "✅ Online"
+            bybit_details = f"(BTC: ${price:,.2f})"
+        else:
+            bybit_status = "⚠️ No data"
+    except Exception as e:
+        bybit_status = "❌ Failed"
+        bybit_details = f"({str(e)[:50]})"
+
+    results.append(f"<b>2. Bybit API</b>\n   {bybit_status} {bybit_details}\n   ⏱ {bybit_time:.0f}ms")
+
+    # ========== 3. BINANCE API TEST ==========
+    binance_status = "❌ Failed"
+    binance_time = 0
+    binance_details = ""
+    try:
+        start = time.time()
+        fetcher = PriceFetcher()
+        ticker = fetcher.binance.fetch_ticker('BTC/USDT')
+        binance_time = (time.time() - start) * 1000
+
+        if ticker and ticker.get('last'):
+            price = ticker['last']
+            binance_status = "✅ Online"
+            binance_details = f"(BTC: ${price:,.2f})"
+        else:
+            binance_status = "⚠️ No data"
+    except Exception as e:
+        binance_status = "❌ Failed"
+        binance_details = f"({str(e)[:50]})"
+
+    results.append(f"<b>3. Binance API</b>\n   {binance_status} {binance_details}\n   ⏱ {binance_time:.0f}ms")
+
+    # ========== 4. TELEGRAM BOT TEST ==========
+    tg_status = "✅ Online"
+    tg_details = "(message sent)"
+    tg_time = (time.time() - total_start) * 1000  # Approximate
+
+    results.append(f"<b>4. Telegram Bot</b>\n   {tg_status} {tg_details}\n   ⏱ {tg_time:.0f}ms")
+
+    # ========== 5. SCANNER STATUS ==========
+    scanner_status = "❌ Not initialized"
+    if price_monitor:
+        status = price_monitor.get_status()
+        if status['running']:
+            scanner_status = f"✅ Running (Scan #{status['scan_count']})"
+        else:
+            scanner_status = "⏸️ Paused"
+
+    results.append(f"<b>5. Price Scanner</b>\n   {scanner_status}")
+
+    # ========== SUMMARY ==========
+    total_time = (time.time() - total_start) * 1000
+
+    # Count passed/failed
+    passed = sum(1 for r in results if "✅" in r)
+    total = len(results)
+
+    summary_emoji = "✅" if passed == total else "⚠️" if passed >= 3 else "❌"
+
+    message = f"""
+{summary_emoji} <b>Health Check Results</b>
+
+{chr(10).join(results)}
+
+━━━━━━━━━━━━━━━━━━━━
+<b>Summary:</b> {passed}/{total} services healthy
+<b>Total time:</b> {total_time:.0f}ms
 """
 
     await update.message.reply_text(message.strip(), parse_mode='HTML')

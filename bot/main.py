@@ -59,6 +59,7 @@ def main():
         application.add_handler(CommandHandler("pause", control_commands.pause_command))
         application.add_handler(CommandHandler("resume", control_commands.resume_command))
         application.add_handler(CommandHandler("status", control_commands.status_command))
+        application.add_handler(CommandHandler("test", control_commands.test_command))
 
         # Stats commands
         application.add_handler(CommandHandler("stats", stats_commands.stats_command))
