@@ -1,0 +1,61 @@
+[build]
+builder = "dockerfile"
+dockerfilePath = "Dockerfile"
+
+[deploy]
+startCommand = "python -m bot.main"
+healthcheckPath = "/"
+healthcheckTimeout = 300
+restartPolicyType = "on_failure"
+restartPolicyMaxRetries = 3
+
+# ===========================================
+# REQUIRED ENVIRONMENT VARIABLES
+# ===========================================
+
+[[env]]
+name = "TELEGRAM_BOT_TOKEN"
+description = "Telegram Bot API Token from @BotFather"
+required = true
+
+[[env]]
+name = "TELEGRAM_GROUP_ID"
+description = "Telegram Group ID (starts with -100...)"
+required = true
+
+[[env]]
+name = "PRICE_ALERTS_TOPIC_ID"
+description = "Topic/Thread ID in your Telegram group for alerts"
+required = true
+
+[[env]]
+name = "ADMIN_USER_IDS"
+description = "Comma-separated Telegram User IDs for admin access (e.g., 123456789,987654321)"
+required = true
+
+[[env]]
+name = "DATABASE_URL"
+description = "PostgreSQL connection string (use ${{Postgres.DATABASE_URL}} for Railway Postgres)"
+required = true
+
+# ===========================================
+# OPTIONAL ENVIRONMENT VARIABLES
+# ===========================================
+
+[[env]]
+name = "LOG_LEVEL"
+description = "Logging level (DEBUG, INFO, WARNING, ERROR)"
+required = false
+default = "INFO"
+
+[[env]]
+name = "SCAN_INTERVAL"
+description = "Seconds between price scans"
+required = false
+default = "30"
+
+[[env]]
+name = "MIN_VOLUME_USD"
+description = "Minimum 24h volume filter in USD"
+required = false
+default = "5000000"
