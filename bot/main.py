@@ -68,6 +68,7 @@ def main():
         application.add_handler(CommandHandler("reseed", admin_commands.reseed_command))
         application.add_handler(CommandHandler("turnoff", admin_commands.turnoff_command))
         application.add_handler(CommandHandler("automap", admin_commands.automap_command))
+        application.add_handler(CommandHandler("ai", admin_commands.ai_toggle_command))
 
         # Control commands
         application.add_handler(CommandHandler("pause", control_commands.pause_command))

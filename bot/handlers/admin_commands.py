@@ -4,7 +4,8 @@ Admin Command Handlers
 /removepair - Remove trading pair
 /cooldown - Set alert cooldown
 /turnoff - Toggle API sources
-/automap - Auto-map symbols with Gemini AI
+/automap - Auto-map symbols with Gemini AI (batch - 1 API call)
+/ai - Toggle AI mode on/off
 """
 
 import logging
@@ -296,6 +297,7 @@ async def turnoff_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def automap_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """
     Use Gemini AI to automatically map all Mudrex symbols to Bybit
+    Uses BATCH processing - all symbols in ONE API call (FREE tier friendly)
     Usage: /automap
     """
     user_id = update.effective_user.id
@@ -306,7 +308,7 @@ async def automap_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
 
     # Check if Gemini is available
-    from bot.utils.gemini_resolver import is_gemini_available, auto_generate_mappings
+    from bot.utils.gemini_symbol_resolver import is_gemini_available, batch_resolve_symbols
 
     if not is_gemini_available():
         await update.message.reply_text(
@@ -322,10 +324,10 @@ async def automap_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     mudrex_symbols = [p['symbol'] for p in pairs]
 
     await update.message.reply_text(
-        f"🧠 <b>Starting Gemini auto-mapping...</b>\n\n"
+        f"🧠 <b>Starting Gemini 2.5 Flash mapping...</b>\n\n"
         f"📊 Processing {len(mudrex_symbols)} pairs\n"
-        f"⏱️ Estimated time: ~{len(mudrex_symbols) // 60 + 1} minutes\n"
-        f"(1 second per symbol for rate limiting)",
+        f"⏱️ ETA: 3-5 seconds (batch processing)\n"
+        f"💰 Cost: FREE (1 API request)",
         parse_mode='HTML'
     )
 
@@ -337,37 +339,155 @@ async def automap_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         bybit_markets = fetcher.bybit.load_markets()
         bybit_symbols = list(bybit_markets.keys())
 
-        # Run Gemini auto-mapping
-        mappings = auto_generate_mappings(mudrex_symbols, bybit_symbols)
+        # Run Gemini BATCH mapping (all symbols in 1 API call)
+        mappings = batch_resolve_symbols(mudrex_symbols, bybit_symbols)
 
-        # Update symbol mapper with results
-        from bot.utils.symbol_mapper import add_mapping
+        if not mappings:
+            await update.message.reply_text("❌ Gemini failed. Check logs for details.")
+            return
 
-        changed = 0
-        unavailable = 0
+        # Save to AI cache
+        from bot.utils.symbol_mapper import save_ai_cache
 
-        for mudrex_sym, bybit_sym in mappings.items():
-            if bybit_sym is None:
-                unavailable += 1
-                add_mapping(mudrex_sym, None)
-            elif mudrex_sym != bybit_sym:
-                changed += 1
-                add_mapping(mudrex_sym, bybit_sym)
+        save_ai_cache(mappings)
 
-        available = len(mappings) - unavailable
+        # Calculate stats
+        total = len(mappings)
+        available = sum(1 for v in mappings.values() if v is not None)
+        unavailable = sum(1 for v in mappings.values() if v is None)
+        needs_mapping = sum(1 for k, v in mappings.items() if v and k != v)
+
+        # Get sample mappings
+        sample_lines = []
+        count = 0
+        for k, v in mappings.items():
+            if count >= 5:
+                break
+            if v and k != v:
+                sample_lines.append(f"  🔄 {k} → {v}")
+                count += 1
+            elif v is None:
+                sample_lines.append(f"  ❌ {k}")
+                count += 1
+
+        sample_text = "\n".join(sample_lines) if sample_lines else "  (no mappings needed)"
 
         await update.message.reply_text(
-            f"✅ <b>Gemini auto-mapping complete!</b>\n\n"
+            f"✅ <b>Gemini Mapping Complete!</b>\n\n"
             f"📊 <b>Results:</b>\n"
-            f"• Total pairs: {len(mappings)}\n"
-            f"• Available on Bybit: {available}\n"
-            f"• Needs mapping: {changed}\n"
-            f"• Unavailable: {unavailable}\n\n"
-            f"🔄 Mappings have been applied to the current session.\n"
-            f"Run /test to verify.",
+            f"• Total: {total}\n"
+            f"• Available: {available} ({available/total*100:.1f}%)\n"
+            f"• Unavailable: {unavailable}\n"
+            f"• Mapped: {needs_mapping}\n\n"
+            f"📝 <b>Sample:</b>\n"
+            f"{sample_text}\n"
+            f"... and {total - 5} more\n\n"
+            f"💾 Saved to: /tmp/gemini_symbol_mappings.json\n"
+            f"💡 Enable with: /ai on",
             parse_mode='HTML'
         )
 
     except Exception as e:
         logger.error(f"Error in automap command: {e}")
         await update.message.reply_text(f"❌ Error: {e}")
+
+
+async def ai_toggle_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """
+    Toggle AI mode on/off
+    Usage:
+      /ai on  - Enable Gemini AI mappings
+      /ai off - Use manual predefined mappings
+      /ai status - Check current mode
+    """
+    user_id = update.effective_user.id
+
+    # Check admin permission
+    if not is_admin(user_id):
+        await update.message.reply_text("❌ Access denied. Admin only.")
+        return
+
+    if not context.args:
+        # Show current status
+        ai_mode = get_config_value('ai_mode_enabled', 'false')
+        mode_str = "🧠 AI Mode" if ai_mode == 'true' else "📖 Manual Mode"
+
+        await update.message.reply_text(
+            f"<b>Current Mode:</b> {mode_str}\n\n"
+            f"<b>Usage:</b>\n"
+            f"/ai on - Enable AI mappings\n"
+            f"/ai off - Use manual mappings\n"
+            f"/ai status - Check mode details",
+            parse_mode='HTML'
+        )
+        return
+
+    command = context.args[0].lower()
+
+    if command == 'on':
+        # Check if AI cache exists
+        from bot.utils.symbol_mapper import get_ai_cache_stats
+
+        cache_stats = get_ai_cache_stats()
+
+        if cache_stats['loaded']:
+            cache_status = f"✅ {cache_stats['count']} symbols cached"
+        else:
+            cache_status = "⚠️ No cache found, run /automap first"
+
+        set_config_value('ai_mode_enabled', 'true', str(user_id))
+
+        await update.message.reply_text(
+            f"✅ <b>AI Mode Enabled</b>\n\n"
+            f"🧠 Using Gemini 2.5 Flash mappings\n"
+            f"📂 Cache: {cache_status}\n\n"
+            f"💰 FREE tier: 20-50 requests/day\n"
+            f"📊 Our usage: ~11 requests/month",
+            parse_mode='HTML'
+        )
+
+    elif command == 'off':
+        set_config_value('ai_mode_enabled', 'false', str(user_id))
+        await update.message.reply_text(
+            f"✅ <b>Manual Mode Enabled</b>\n\n"
+            f"📖 Using predefined mappings\n"
+            f"🔧 Edit symbol_mapper.py to add more\n\n"
+            f"💡 Tip: Use /ai on for auto-mapping",
+            parse_mode='HTML'
+        )
+
+    elif command == 'status':
+        ai_mode = get_config_value('ai_mode_enabled', 'false')
+
+        if ai_mode == 'true':
+            from bot.utils.symbol_mapper import get_ai_cache_stats
+            cache_stats = get_ai_cache_stats()
+
+            if cache_stats['loaded']:
+                await update.message.reply_text(
+                    f"🧠 <b>AI Mode Active</b>\n\n"
+                    f"📂 Cache: {cache_stats['count']} symbols\n"
+                    f"✅ Available: {cache_stats['available']}\n"
+                    f"❌ Unavailable: {cache_stats['unavailable']}\n"
+                    f"🔄 Mapped: {cache_stats['mapped']}\n\n"
+                    f"💰 Cost: FREE tier\n"
+                    f"🔄 Run /automap to refresh",
+                    parse_mode='HTML'
+                )
+            else:
+                await update.message.reply_text(
+                    f"🧠 <b>AI Mode Active</b>\n\n"
+                    f"⚠️ No cache found\n"
+                    f"🔧 Run /automap to generate",
+                    parse_mode='HTML'
+                )
+        else:
+            await update.message.reply_text(
+                f"📖 <b>Manual Mode Active</b>\n\n"
+                f"📝 Using predefined mappings\n"
+                f"💡 Switch with /ai on",
+                parse_mode='HTML'
+            )
+
+    else:
+        await update.message.reply_text("❌ Use: /ai on, /ai off, or /ai status")

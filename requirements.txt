@@ -26,5 +26,5 @@ requests==2.31.0
 # Retry Logic
 tenacity==8.2.3
 
-# Gemini AI for symbol mapping
-google-generativeai==0.3.2
+# Gemini AI for symbol mapping (FREE tier: 15 RPM, 20-50 RPD)
+google-generativeai==0.8.3
