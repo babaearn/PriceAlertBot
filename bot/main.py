@@ -7,7 +7,7 @@ import sys
 from telegram.ext import Application, CommandHandler
 from bot import config
 from bot.services.price_monitor import PriceMonitor
-from bot.services.database import initialize_database
+from bot.services.database import initialize_database, seed_initial_pairs
 from bot.handlers import admin_commands, control_commands, stats_commands
 
 # CRITICAL: Setup logging with token masking
@@ -45,6 +45,9 @@ def main():
         # Initialize database schema (creates tables if not exist)
         logger.info("📦 Initializing database...")
         initialize_database()
+
+        # Seed initial trading pairs if database is empty
+        seed_initial_pairs()
 
         # Create application
         application = (

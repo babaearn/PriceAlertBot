@@ -309,6 +309,56 @@ def cleanup_old_data():
         conn.close()
 
 
+def seed_initial_pairs():
+    """Seed initial trading pairs if database is empty"""
+    # Check if pairs already exist
+    conn = get_connection()
+    try:
+        with conn.cursor() as cur:
+            cur.execute("SELECT COUNT(*) FROM active_pairs")
+            count = cur.fetchone()[0]
+
+            if count > 0:
+                logger.info(f"📊 Database already has {count} pairs, skipping seed")
+                return
+
+            # Seed initial pairs
+            initial_pairs = [
+                ('BTC/USDT', 'https://mudrex.go.link/btc', 'system'),
+                ('ETH/USDT', 'https://mudrex.go.link/eth', 'system'),
+                ('SOL/USDT', 'https://mudrex.go.link/sol', 'system'),
+                ('XRP/USDT', 'https://mudrex.go.link/xrp', 'system'),
+                ('ADA/USDT', 'https://mudrex.go.link/ada', 'system'),
+                ('DOGE/USDT', 'https://mudrex.go.link/doge', 'system'),
+                ('AVAX/USDT', 'https://mudrex.go.link/avax', 'system'),
+                ('MATIC/USDT', 'https://mudrex.go.link/matic', 'system'),
+                ('DOT/USDT', 'https://mudrex.go.link/dot', 'system'),
+                ('UNI/USDT', 'https://mudrex.go.link/uni', 'system'),
+                ('LINK/USDT', 'https://mudrex.go.link/link', 'system'),
+                ('ATOM/USDT', 'https://mudrex.go.link/atom', 'system'),
+                ('LTC/USDT', 'https://mudrex.go.link/ltc', 'system'),
+                ('BCH/USDT', 'https://mudrex.go.link/bch', 'system'),
+                ('NEAR/USDT', 'https://mudrex.go.link/near', 'system'),
+                ('ALGO/USDT', 'https://mudrex.go.link/algo', 'system'),
+                ('VET/USDT', 'https://mudrex.go.link/vet', 'system'),
+                ('ICP/USDT', 'https://mudrex.go.link/icp', 'system'),
+                ('FIL/USDT', 'https://mudrex.go.link/fil', 'system'),
+                ('APT/USDT', 'https://mudrex.go.link/apt', 'system'),
+            ]
+
+            cur.executemany(
+                "INSERT INTO active_pairs (symbol, adjust_link, added_by) VALUES (%s, %s, %s)",
+                initial_pairs
+            )
+            conn.commit()
+            logger.info(f"✅ Seeded {len(initial_pairs)} initial trading pairs")
+    except Exception as e:
+        conn.rollback()
+        logger.error(f"Failed to seed pairs: {e}")
+    finally:
+        conn.close()
+
+
 def initialize_database():
     """Initialize database with schema (auto-creates tables if not exist)"""
     schema = """
