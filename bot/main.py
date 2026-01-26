@@ -7,6 +7,7 @@ import sys
 from telegram.ext import Application, CommandHandler
 from bot import config
 from bot.services.price_monitor import PriceMonitor
+from bot.services.database import initialize_database
 from bot.handlers import admin_commands, control_commands, stats_commands
 
 # CRITICAL: Setup logging with token masking
@@ -32,12 +33,19 @@ async def post_init(application: Application):
     monitor = PriceMonitor(application.bot)
     monitor.start()
 
+    # Set reference for control commands (for /status, /test, /pause, /resume)
+    control_commands.set_price_monitor(monitor)
+
     logger.info("✅ Price monitor started")
 
 
 def main():
     """Main entry point"""
     try:
+        # Initialize database schema (creates tables if not exist)
+        logger.info("📦 Initializing database...")
+        initialize_database()
+
         # Create application
         application = (
             Application.builder()
