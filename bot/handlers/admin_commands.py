@@ -10,7 +10,7 @@ from telegram import Update
 from telegram.ext import ContextTypes
 from bot.utils.validators import is_admin, validate_symbol, validate_adjust_link, parse_cooldown
 from bot.utils.helpers import parse_bulk_pairs
-from bot.services.database import add_pair, remove_pair, set_config_value
+from bot.services.database import add_pair, remove_pair, set_config_value, seed_initial_pairs
 
 logger = logging.getLogger(__name__)
 
@@ -184,3 +184,37 @@ async def cooldown_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
             time_str = f"{mins}m"
 
         await update.message.reply_text(f"✅ Cooldown set to: {time_str}")
+
+
+async def reseed_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """
+    Force reseed all trading pairs
+    Usage: /reseed
+    WARNING: This will clear all existing pairs and reload from seed data
+    """
+    user_id = update.effective_user.id
+
+    # Check admin permission
+    if not is_admin(user_id):
+        await update.message.reply_text("❌ Access denied. Admin only.")
+        return
+
+    await update.message.reply_text("🔄 <b>Reseeding database...</b>\nThis will clear existing pairs and reload 438 pairs.", parse_mode='HTML')
+
+    try:
+        # Force reseed
+        count = seed_initial_pairs(force_reseed=True)
+
+        if count > 0:
+            await update.message.reply_text(
+                f"✅ <b>Reseed complete!</b>\n\n"
+                f"Loaded <b>{count}</b> trading pairs with Adjust links.\n\n"
+                f"Run /test to verify.",
+                parse_mode='HTML'
+            )
+        else:
+            await update.message.reply_text("❌ Reseed failed. Check logs for details.")
+
+    except Exception as e:
+        logger.error(f"Error in reseed command: {e}")
+        await update.message.reply_text(f"❌ Error: {e}")

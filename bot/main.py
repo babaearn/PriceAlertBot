@@ -65,6 +65,7 @@ def main():
         application.add_handler(CommandHandler("addnew", admin_commands.addnew_command))
         application.add_handler(CommandHandler("removepair", admin_commands.removepair_command))
         application.add_handler(CommandHandler("cooldown", admin_commands.cooldown_command))
+        application.add_handler(CommandHandler("reseed", admin_commands.reseed_command))
 
         # Control commands
         application.add_handler(CommandHandler("pause", control_commands.pause_command))

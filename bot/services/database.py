@@ -309,20 +309,26 @@ def cleanup_old_data():
         conn.close()
 
 
-def seed_initial_pairs():
-    """Seed all 478 active trading pairs with Adjust links"""
-    # Check if pairs already exist
+def seed_initial_pairs(force_reseed=False):
+    """Seed all 438 active trading pairs with Adjust links"""
     conn = get_connection()
     try:
         with conn.cursor() as cur:
             cur.execute("SELECT COUNT(*) FROM active_pairs")
             count = cur.fetchone()[0]
 
-            if count > 0:
+            if count > 0 and not force_reseed:
                 logger.info(f"📊 Database already has {count} pairs, skipping seed")
-                return
+                return 0
 
-            # All 478 pairs with Adjust links
+            if force_reseed and count > 0:
+                logger.info(f"🔄 Force reseed: Clearing {count} existing pairs...")
+                cur.execute("DELETE FROM price_snapshots")
+                cur.execute("DELETE FROM alert_history")
+                cur.execute("DELETE FROM active_pairs")
+                conn.commit()
+
+            # All 438 pairs with Adjust links
             initial_pairs = [
                 ('BTC/USDT', 'https://mudrex.go.link/1Yogo', 'system'),
                 ('ETH/USDT', 'https://mudrex.go.link/kmYNX', 'system'),
@@ -769,9 +775,11 @@ def seed_initial_pairs():
             )
             conn.commit()
             logger.info(f"✅ Seeded {len(initial_pairs)} trading pairs with Adjust links")
+            return len(initial_pairs)
     except Exception as e:
         conn.rollback()
         logger.error(f"Failed to seed pairs: {e}")
+        return 0
     finally:
         conn.close()
 
