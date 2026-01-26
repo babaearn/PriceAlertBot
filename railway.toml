@@ -57,3 +57,8 @@ name = "MIN_VOLUME_USD"
 description = "Minimum 24h volume filter in USD"
 required = false
 default = "5000000"
+
+[[env]]
+name = "GEMINI_API_KEY"
+description = "Google Gemini API key for AI symbol mapping (get at https://aistudio.google.com/app/apikey)"
+required = false

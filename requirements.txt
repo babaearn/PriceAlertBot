@@ -25,3 +25,6 @@ requests==2.31.0
 
 # Retry Logic
 tenacity==8.2.3
+
+# Gemini AI for symbol mapping
+google-generativeai==0.3.2

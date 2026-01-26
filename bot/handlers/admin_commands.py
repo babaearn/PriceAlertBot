@@ -3,6 +3,8 @@ Admin Command Handlers
 /addnew - Add new trading pairs (single or bulk)
 /removepair - Remove trading pair
 /cooldown - Set alert cooldown
+/turnoff - Toggle API sources
+/automap - Auto-map symbols with Gemini AI
 """
 
 import logging
@@ -10,7 +12,7 @@ from telegram import Update
 from telegram.ext import ContextTypes
 from bot.utils.validators import is_admin, validate_symbol, validate_adjust_link, parse_cooldown
 from bot.utils.helpers import parse_bulk_pairs
-from bot.services.database import add_pair, remove_pair, set_config_value, seed_initial_pairs
+from bot.services.database import add_pair, remove_pair, set_config_value, get_config_value, seed_initial_pairs, get_active_pairs
 
 logger = logging.getLogger(__name__)
 
@@ -217,4 +219,155 @@ async def reseed_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     except Exception as e:
         logger.error(f"Error in reseed command: {e}")
+        await update.message.reply_text(f"❌ Error: {e}")
+
+
+async def turnoff_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """
+    Toggle API sources on/off
+    Usage:
+      /turnoff binance - Disable Binance, use only Bybit
+      /turnoff bybit - Disable Bybit, use only Binance
+      /turnoff none - Enable both APIs (default)
+    """
+    user_id = update.effective_user.id
+
+    # Check admin permission
+    if not is_admin(user_id):
+        await update.message.reply_text("❌ Access denied. Admin only.")
+        return
+
+    if not context.args:
+        # Show current status
+        bybit_status = get_config_value('api_bybit_enabled', 'true')
+        binance_status = get_config_value('api_binance_enabled', 'true')
+
+        await update.message.reply_text(
+            "🔧 <b>API Toggle Settings</b>\n\n"
+            f"🔵 Bybit: {'✅ Enabled' if bybit_status == 'true' else '❌ Disabled'}\n"
+            f"🟡 Binance: {'✅ Enabled' if binance_status == 'true' else '❌ Disabled'}\n\n"
+            "<b>Usage:</b>\n"
+            "/turnoff binance - Use only Bybit\n"
+            "/turnoff bybit - Use only Binance\n"
+            "/turnoff none - Enable both (default)",
+            parse_mode='HTML'
+        )
+        return
+
+    target = context.args[0].lower()
+
+    if target == 'binance':
+        set_config_value('api_bybit_enabled', 'true', str(user_id))
+        set_config_value('api_binance_enabled', 'false', str(user_id))
+        await update.message.reply_text(
+            "✅ <b>Binance API disabled</b>\n\n"
+            "🔵 Using ONLY Bybit for price data\n"
+            "⚠️ If Bybit fails, no fallback available",
+            parse_mode='HTML'
+        )
+
+    elif target == 'bybit':
+        set_config_value('api_bybit_enabled', 'false', str(user_id))
+        set_config_value('api_binance_enabled', 'true', str(user_id))
+        await update.message.reply_text(
+            "✅ <b>Bybit API disabled</b>\n\n"
+            "🟡 Using ONLY Binance for price data\n"
+            "⚠️ Not recommended - Bybit has more pairs",
+            parse_mode='HTML'
+        )
+
+    elif target == 'none':
+        set_config_value('api_bybit_enabled', 'true', str(user_id))
+        set_config_value('api_binance_enabled', 'true', str(user_id))
+        await update.message.reply_text(
+            "✅ <b>Both APIs enabled</b>\n\n"
+            "🔵 Primary: Bybit\n"
+            "🟡 Fallback: Binance",
+            parse_mode='HTML'
+        )
+
+    else:
+        await update.message.reply_text(
+            "❌ Invalid option.\n\n"
+            "Valid options: binance, bybit, none"
+        )
+
+
+async def automap_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """
+    Use Gemini AI to automatically map all Mudrex symbols to Bybit
+    Usage: /automap
+    """
+    user_id = update.effective_user.id
+
+    # Check admin permission
+    if not is_admin(user_id):
+        await update.message.reply_text("❌ Access denied. Admin only.")
+        return
+
+    # Check if Gemini is available
+    from bot.utils.gemini_resolver import is_gemini_available, auto_generate_mappings
+
+    if not is_gemini_available():
+        await update.message.reply_text(
+            "❌ <b>Gemini API not configured</b>\n\n"
+            "Add GEMINI_API_KEY to your environment variables.\n"
+            "Get your key at: https://aistudio.google.com/app/apikey",
+            parse_mode='HTML'
+        )
+        return
+
+    # Get Mudrex symbols
+    pairs = get_active_pairs()
+    mudrex_symbols = [p['symbol'] for p in pairs]
+
+    await update.message.reply_text(
+        f"🧠 <b>Starting Gemini auto-mapping...</b>\n\n"
+        f"📊 Processing {len(mudrex_symbols)} pairs\n"
+        f"⏱️ Estimated time: ~{len(mudrex_symbols) // 60 + 1} minutes\n"
+        f"(1 second per symbol for rate limiting)",
+        parse_mode='HTML'
+    )
+
+    try:
+        # Get Bybit symbols
+        from bot.services.price_fetcher import PriceFetcher
+
+        fetcher = PriceFetcher()
+        bybit_markets = fetcher.bybit.load_markets()
+        bybit_symbols = list(bybit_markets.keys())
+
+        # Run Gemini auto-mapping
+        mappings = auto_generate_mappings(mudrex_symbols, bybit_symbols)
+
+        # Update symbol mapper with results
+        from bot.utils.symbol_mapper import add_mapping
+
+        changed = 0
+        unavailable = 0
+
+        for mudrex_sym, bybit_sym in mappings.items():
+            if bybit_sym is None:
+                unavailable += 1
+                add_mapping(mudrex_sym, None)
+            elif mudrex_sym != bybit_sym:
+                changed += 1
+                add_mapping(mudrex_sym, bybit_sym)
+
+        available = len(mappings) - unavailable
+
+        await update.message.reply_text(
+            f"✅ <b>Gemini auto-mapping complete!</b>\n\n"
+            f"📊 <b>Results:</b>\n"
+            f"• Total pairs: {len(mappings)}\n"
+            f"• Available on Bybit: {available}\n"
+            f"• Needs mapping: {changed}\n"
+            f"• Unavailable: {unavailable}\n\n"
+            f"🔄 Mappings have been applied to the current session.\n"
+            f"Run /test to verify.",
+            parse_mode='HTML'
+        )
+
+    except Exception as e:
+        logger.error(f"Error in automap command: {e}")
         await update.message.reply_text(f"❌ Error: {e}")
