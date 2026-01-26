@@ -22,10 +22,28 @@ def validate_env_vars():
     missing = [var for var in required_vars if not os.getenv(var)]
 
     if missing:
-        print(f"❌ ERROR: Missing environment variables: {', '.join(missing)}")
+        # Print to stderr to ensure it shows in logs
+        error_msg = f"❌ FATAL ERROR: Missing environment variables: {', '.join(missing)}"
+        print(error_msg, file=sys.stderr, flush=True)
+        print(error_msg, flush=True)
+
+        # Show which vars ARE set (for debugging)
+        print("\n📋 Current environment variables:", flush=True)
+        for var in required_vars:
+            value = os.getenv(var)
+            if value:
+                # Mask sensitive values
+                if 'TOKEN' in var or 'URL' in var:
+                    display = value[:10] + '...' if len(value) > 10 else '***'
+                else:
+                    display = value
+                print(f"  ✅ {var} = {display}", flush=True)
+            else:
+                print(f"  ❌ {var} = NOT SET", flush=True)
+
         sys.exit(1)
 
-    print("✅ All required environment variables present")
+    print("✅ All required environment variables present", flush=True)
 
 
 # Run validation

@@ -15,10 +15,13 @@ logger = logging.getLogger(__name__)
 def get_connection():
     """Get database connection"""
     try:
+        if not config.DATABASE_URL:
+            raise ValueError("DATABASE_URL is not set")
         conn = psycopg2.connect(config.DATABASE_URL)
         return conn
     except Exception as e:
-        logger.error(f"Database connection failed: {e}")
+        logger.error(f"❌ Database connection failed: {e}")
+        logger.error(f"   DATABASE_URL starts with: {config.DATABASE_URL[:20] if config.DATABASE_URL else 'NOT SET'}...")
         raise
 
 

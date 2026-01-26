@@ -4,25 +4,41 @@ Main Entry Point with Token Masking Security Fix
 
 import logging
 import sys
+
+# CRITICAL: Setup logging FIRST before any other imports
+# This ensures errors during config validation are logged
+logging.basicConfig(
+    format="%(asctime)s | %(levelname)s | %(name)s | %(message)s",
+    level=logging.INFO,
+    handlers=[logging.StreamHandler(sys.stdout)]
+)
+
+logger = logging.getLogger(__name__)
+logger.info("🔄 Starting Price Alert Bot...")
+
+# Now import config (this runs validation)
+try:
+    from bot import config
+except SystemExit:
+    logger.error("❌ Configuration validation failed! Check environment variables.")
+    raise
+except Exception as e:
+    logger.error(f"❌ Failed to load config: {e}")
+    raise
+
+# Update log level from config
+logging.getLogger().setLevel(getattr(logging, config.LOG_LEVEL))
+
+# Now import other modules
 from telegram.ext import Application, CommandHandler
-from bot import config
 from bot.services.price_monitor import PriceMonitor
 from bot.services.database import initialize_database, seed_initial_pairs
 from bot.handlers import admin_commands, control_commands, stats_commands
-
-# CRITICAL: Setup logging with token masking
-logging.basicConfig(
-    format="%(asctime)s | %(levelname)s | %(name)s | %(message)s",
-    level=getattr(logging, config.LOG_LEVEL),
-    handlers=[logging.StreamHandler(sys.stdout)]
-)
 
 # 🔐 SECURITY FIX: Prevent token exposure in logs
 logging.getLogger("httpx").setLevel(logging.WARNING)
 logging.getLogger("httpcore").setLevel(logging.WARNING)
 logging.getLogger("telegram").setLevel(logging.WARNING)
-
-logger = logging.getLogger(__name__)
 
 
 async def post_init(application: Application):
