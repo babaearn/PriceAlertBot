@@ -787,6 +787,177 @@ def seed_initial_pairs(force_reseed=False):
         conn.close()
 
 
+# ==========================================
+# ADJUST LINK CACHE FUNCTIONS (for AI mode)
+# ==========================================
+
+def get_cached_adjust_link(bybit_symbol: str) -> Optional[str]:
+    """
+    Get cached Adjust link for a Bybit symbol
+
+    Returns:
+        - URL string if found
+        - Empty string '' if explicitly marked as unavailable
+        - None if not cached yet
+    """
+    conn = get_connection()
+    try:
+        with conn.cursor() as cur:
+            cur.execute("""
+                SELECT adjust_link FROM adjust_link_cache
+                WHERE bybit_symbol = %s
+            """, (bybit_symbol,))
+
+            result = cur.fetchone()
+            if result is not None:
+                return result[0]  # Returns URL or empty string
+            return None  # Not cached
+
+    except Exception as e:
+        logger.error(f"Error getting cached link: {e}")
+        return None
+    finally:
+        conn.close()
+
+
+def cache_adjust_link(bybit_symbol: str, adjust_link: str, found_by: str = 'ai'):
+    """
+    Cache Adjust link for future use
+
+    Args:
+        bybit_symbol: Bybit symbol (e.g., "1000SHIB/USDT")
+        adjust_link: Adjust URL or empty string for unavailable
+        found_by: Source of the link ('ai', 'manual', 'seed')
+    """
+    conn = get_connection()
+    try:
+        with conn.cursor() as cur:
+            cur.execute("""
+                INSERT INTO adjust_link_cache (bybit_symbol, adjust_link, found_by, updated_at)
+                VALUES (%s, %s, %s, NOW())
+                ON CONFLICT (bybit_symbol)
+                DO UPDATE SET adjust_link = EXCLUDED.adjust_link,
+                              found_by = EXCLUDED.found_by,
+                              updated_at = NOW()
+            """, (bybit_symbol, adjust_link, found_by))
+            conn.commit()
+
+            status = "unavailable" if adjust_link == '' else "cached"
+            logger.debug(f"Cached: {bybit_symbol} -> {status}")
+
+    except Exception as e:
+        conn.rollback()
+        logger.error(f"Error caching link: {e}")
+    finally:
+        conn.close()
+
+
+def get_all_known_adjust_links() -> Dict:
+    """
+    Load all known Adjust links for AI context
+    Returns: {symbol: adjust_link}
+    """
+    conn = get_connection()
+    try:
+        with conn.cursor() as cur:
+            # Get from cache table
+            cur.execute("""
+                SELECT bybit_symbol, adjust_link
+                FROM adjust_link_cache
+                WHERE adjust_link != ''
+            """)
+            cache_results = cur.fetchall()
+
+            # Also get from active_pairs table
+            cur.execute("""
+                SELECT symbol, adjust_link
+                FROM active_pairs
+                WHERE status = 'active' AND adjust_link IS NOT NULL AND adjust_link != ''
+            """)
+            pairs_results = cur.fetchall()
+
+            # Combine both sources
+            links = {}
+            for row in cache_results:
+                links[row[0]] = row[1]
+            for row in pairs_results:
+                if row[0] not in links:
+                    links[row[0]] = row[1]
+
+            return links
+
+    except Exception as e:
+        logger.error(f"Error loading known links: {e}")
+        return {}
+    finally:
+        conn.close()
+
+
+def save_session_start_price(symbol: str, price: float):
+    """Save session start price for a new pair (for native Bybit mode)"""
+    conn = get_connection()
+    try:
+        today = date.today()
+
+        with conn.cursor() as cur:
+            cur.execute("""
+                INSERT INTO session_prices (symbol, session_date, start_price)
+                VALUES (%s, %s, %s)
+                ON CONFLICT (symbol, session_date)
+                DO NOTHING
+            """, (symbol, today, price))
+            conn.commit()
+
+    except Exception as e:
+        conn.rollback()
+        logger.error(f"Error saving session price: {e}")
+    finally:
+        conn.close()
+
+
+def get_session_start_price_native(symbol: str) -> Optional[float]:
+    """Get session start price for native Bybit mode"""
+    conn = get_connection()
+    try:
+        today = date.today()
+
+        with conn.cursor() as cur:
+            cur.execute("""
+                SELECT start_price FROM session_prices
+                WHERE symbol = %s AND session_date = %s
+            """, (symbol, today))
+
+            result = cur.fetchone()
+            return float(result[0]) if result else None
+
+    except Exception as e:
+        logger.error(f"Error getting session start price: {e}")
+        return None
+    finally:
+        conn.close()
+
+
+def clear_session_prices():
+    """Clear all session prices (for daily reset)"""
+    conn = get_connection()
+    try:
+        yesterday = date.today() - timedelta(days=1)
+
+        with conn.cursor() as cur:
+            cur.execute("""
+                DELETE FROM session_prices
+                WHERE session_date < %s
+            """, (yesterday,))
+            conn.commit()
+            logger.info("Cleared old session prices")
+
+    except Exception as e:
+        conn.rollback()
+        logger.error(f"Error clearing session prices: {e}")
+    finally:
+        conn.close()
+
+
 def initialize_database():
     """Initialize database with schema (auto-creates tables if not exist)"""
     schema = """
@@ -849,11 +1020,30 @@ def initialize_database():
         timestamp TIMESTAMP DEFAULT NOW()
     );
 
+    -- Adjust link cache (for AI-discovered links)
+    CREATE TABLE IF NOT EXISTS adjust_link_cache (
+        bybit_symbol VARCHAR(30) PRIMARY KEY,
+        adjust_link TEXT NOT NULL DEFAULT '',
+        updated_at TIMESTAMP DEFAULT NOW(),
+        found_by VARCHAR(20) DEFAULT 'ai'
+    );
+
+    -- Session start prices (for native Bybit mode)
+    CREATE TABLE IF NOT EXISTS session_prices (
+        symbol VARCHAR(30) NOT NULL,
+        session_date DATE NOT NULL,
+        start_price DECIMAL(20, 8) NOT NULL,
+        created_at TIMESTAMP DEFAULT NOW(),
+        PRIMARY KEY (symbol, session_date)
+    );
+
     -- Default config values
     INSERT INTO bot_config (key, value) VALUES
         ('cooldown_minutes', '0'),
         ('min_volume_usd', '5000000'),
-        ('scanner_status', 'running')
+        ('scanner_status', 'running'),
+        ('native_bybit_mode', 'false'),
+        ('ai_mode_enabled', 'false')
     ON CONFLICT (key) DO NOTHING;
 
     -- Indexes for performance

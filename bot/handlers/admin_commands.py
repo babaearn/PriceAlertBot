@@ -491,3 +491,105 @@ async def ai_toggle_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     else:
         await update.message.reply_text("❌ Use: /ai on, /ai off, or /ai status")
+
+
+async def nativebybit_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """
+    Toggle native Bybit mode on/off
+    Usage:
+      /nativebybit on  - Monitor ALL Bybit pairs, find links with AI
+      /nativebybit off - Use predefined pairs from database
+    """
+    user_id = update.effective_user.id
+
+    # Check admin permission
+    if not is_admin(user_id):
+        await update.message.reply_text("❌ Access denied. Admin only.")
+        return
+
+    if not context.args:
+        # Show current status
+        mode = get_config_value('native_bybit_mode', 'false')
+        mode_str = "Native Bybit (ALL pairs)" if mode == 'true' else "Predefined pairs (438)"
+
+        await update.message.reply_text(
+            f"<b>Current Scanner Mode:</b> {mode_str}\n\n"
+            f"<b>Usage:</b>\n"
+            f"/nativebybit on - Monitor ALL Bybit pairs\n"
+            f"/nativebybit off - Use predefined 438 pairs",
+            parse_mode='HTML'
+        )
+        return
+
+    command = context.args[0].lower()
+
+    if command == 'on':
+        set_config_value('native_bybit_mode', 'true', str(user_id))
+        await update.message.reply_text(
+            f"<b>Native Bybit Mode Enabled</b>\n\n"
+            f"Scanner will now monitor ALL Bybit USDT pairs\n"
+            f"Adjust links found by AI when alerts fire\n\n"
+            f"<b>Benefits:</b>\n"
+            f"• 500+ pairs monitored\n"
+            f"• Auto-detects new listings\n"
+            f"• No manual symbol mapping\n\n"
+            f"<b>Note:</b> GEMINI_API_KEY required for link finding",
+            parse_mode='HTML'
+        )
+
+    elif command == 'off':
+        set_config_value('native_bybit_mode', 'false', str(user_id))
+        await update.message.reply_text(
+            f"<b>Native Bybit Mode Disabled</b>\n\n"
+            f"Scanner will use predefined 438 pairs\n"
+            f"Using pre-loaded Adjust links\n\n"
+            f"<b>Run /reseed</b> if pairs not loaded",
+            parse_mode='HTML'
+        )
+
+    else:
+        await update.message.reply_text("❌ Use: /nativebybit on or /nativebybit off")
+
+
+async def seedlinks_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """
+    Seed known Adjust links from active_pairs to cache
+    Gives AI better context for pattern matching
+    Usage: /seedlinks
+    """
+    user_id = update.effective_user.id
+
+    # Check admin permission
+    if not is_admin(user_id):
+        await update.message.reply_text("❌ Access denied. Admin only.")
+        return
+
+    await update.message.reply_text("Seeding known Adjust links to cache...")
+
+    try:
+        from bot.services.database import cache_adjust_link
+
+        # Get all pairs with links
+        pairs = get_active_pairs()
+
+        seeded = 0
+        for pair in pairs:
+            symbol = pair['symbol']
+            adjust_link = pair['adjust_link']
+
+            if adjust_link and adjust_link.strip():
+                cache_adjust_link(symbol, adjust_link, found_by='seed')
+                seeded += 1
+
+        await update.message.reply_text(
+            f"<b>Seeding Complete!</b>\n\n"
+            f"Loaded {seeded} Adjust links to cache\n"
+            f"AI will use these for pattern matching\n\n"
+            f"<b>Now you can:</b>\n"
+            f"/nativebybit on - Enable native Bybit mode",
+            parse_mode='HTML'
+        )
+
+    except Exception as e:
+        logger.error(f"Error in seedlinks command: {e}")
+        await update.message.reply_text(f"❌ Seeding failed: {e}")

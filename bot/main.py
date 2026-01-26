@@ -85,6 +85,8 @@ def main():
         application.add_handler(CommandHandler("turnoff", admin_commands.turnoff_command))
         application.add_handler(CommandHandler("automap", admin_commands.automap_command))
         application.add_handler(CommandHandler("ai", admin_commands.ai_toggle_command))
+        application.add_handler(CommandHandler("nativebybit", admin_commands.nativebybit_command))
+        application.add_handler(CommandHandler("seedlinks", admin_commands.seedlinks_command))
 
         # Control commands
         application.add_handler(CommandHandler("pause", control_commands.pause_command))

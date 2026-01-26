@@ -1,10 +1,13 @@
 """
 Alert Checking Logic - Threshold Detection
+Supports both pre-loaded Adjust links and AI-powered link discovery
 """
 
 from datetime import date
+from typing import Optional
 from bot.services.database import (
     get_session_start_price,
+    save_session_start_price,
     check_alert_fired,
     log_alert
 )
@@ -96,5 +99,109 @@ async def check_and_fire_alerts(pair_data, send_alert_callback):
 
         except Exception as e:
             logger.error(f"Alert send failed for {symbol}: {e}")
+
+    return alerts_fired
+
+
+async def check_and_fire_alerts_with_ai(pair_data: dict, send_alert_callback) -> int:
+    """
+    Check thresholds and fire alerts with AI-powered Adjust link discovery
+
+    This function:
+    1. Uses AI to find Adjust links on-demand when alerts fire
+    2. Caches links for future use
+    3. Skips pairs without links
+
+    Args:
+        pair_data: {symbol, current_price, volume_24h}
+        send_alert_callback: Async function to send alerts
+
+    Returns:
+        Number of alerts fired
+    """
+    from bot.services.adjust_link_finder import find_adjust_link_with_ai
+
+    symbol = pair_data['symbol']
+    current_price = pair_data['current_price']
+    volume_24h = pair_data['volume_24h']
+
+    # CRITICAL: Skip if volume too low
+    if volume_24h < MIN_VOLUME_24H:
+        logger.debug(f"Skipping {symbol} - Low volume: ${volume_24h:,.0f}")
+        return 0
+
+    # Get session start price (00:00 UTC)
+    session_start_price = get_session_start_price(symbol)
+
+    if not session_start_price:
+        # First time seeing this pair, save current price as session start
+        save_session_start_price(symbol, current_price)
+        logger.debug(f"New pair tracked: {symbol} @ ${current_price}")
+        return 0
+
+    # Calculate % change from session start
+    change_percent = ((current_price - session_start_price) / session_start_price) * 100
+
+    # Find crossed thresholds
+    thresholds_crossed = []
+
+    if change_percent > 0:
+        for threshold in GAINER_THRESHOLDS:
+            if change_percent >= threshold:
+                thresholds_crossed.append(threshold)
+    else:
+        for threshold in LOSER_THRESHOLDS:
+            if change_percent <= threshold:
+                thresholds_crossed.append(threshold)
+
+    if not thresholds_crossed:
+        return 0
+
+    # Fire alerts for new threshold crossings
+    alerts_fired = 0
+    today = date.today()
+
+    for threshold in thresholds_crossed:
+        # Skip if already fired today
+        if check_alert_fired(symbol, threshold, today):
+            continue
+
+        # AI: Find Adjust link (with caching)
+        adjust_link = await find_adjust_link_with_ai(symbol)
+
+        if not adjust_link:
+            logger.debug(f"Skipping alert for {symbol}: No Mudrex Adjust link found")
+            continue
+
+        try:
+            # Send alert with AI-found link
+            message_id = await send_alert_callback(
+                symbol=symbol,
+                current_price=current_price,
+                session_start_price=session_start_price,
+                change_percent=change_percent,
+                adjust_link=adjust_link
+            )
+
+            # Log to database
+            log_alert(
+                symbol=symbol,
+                threshold_percent=threshold,
+                trigger_price=current_price,
+                session_start_price=session_start_price,
+                actual_change_percent=change_percent,
+                volume_24h=volume_24h,
+                telegram_message_id=message_id,
+                session_date=today
+            )
+
+            alerts_fired += 1
+            logger.info(
+                f"🚨 Alert fired: {symbol} {change_percent:+.1f}% "
+                f"(threshold: {threshold}%)"
+            )
+
+        except Exception as e:
+            logger.error(f"Failed to send alert for {symbol}: {e}")
 
     return alerts_fired

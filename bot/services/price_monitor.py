@@ -1,14 +1,17 @@
 """
 Price Monitoring Service - Background Scanner with APScheduler
+Supports two modes:
+1. Traditional: Monitor pre-defined pairs from database
+2. Native Bybit: Monitor ALL Bybit pairs, find Adjust links with AI
 """
 
 import asyncio
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from bot.services.price_fetcher import PriceFetcher
-from bot.services.alert_checker import check_and_fire_alerts
+from bot.services.alert_checker import check_and_fire_alerts, check_and_fire_alerts_with_ai
 from bot.services.session_manager import SessionManager
-from bot.services.database import get_active_pairs, log_scan_cycle, save_price_snapshot
-from bot.config import SCAN_INTERVAL, BATCH_SIZE, TELEGRAM_GROUP_ID, PRICE_ALERTS_TOPIC_ID
+from bot.services.database import get_active_pairs, log_scan_cycle, save_price_snapshot, get_config_value
+from bot.config import SCAN_INTERVAL, BATCH_SIZE, TELEGRAM_GROUP_ID, PRICE_ALERTS_TOPIC_ID, MIN_VOLUME_24H
 import logging
 import time
 
@@ -35,13 +38,94 @@ class PriceMonitor:
             logger.debug("Scanner paused, skipping scan")
             return
 
+        # Check which scan mode to use
+        native_bybit_mode = get_config_value('native_bybit_mode', 'false') == 'true'
+
+        if native_bybit_mode:
+            await self.scan_all_bybit_pairs()
+        else:
+            await self.scan_predefined_pairs()
+
+    async def scan_all_bybit_pairs(self):
+        """
+        Monitor ALL Bybit pairs directly (no symbol mapping needed)
+        Find Adjust links with AI when alerts fire
+        """
+        start_time = time.time()
+        self.scan_count += 1
+
+        try:
+            logger.info(f"Scan #{self.scan_count}: Fetching all Bybit pairs...")
+
+            # Check for session reset (00:00 UTC)
+            if self.session_manager.check_and_reset_session():
+                logger.info("Daily session reset complete")
+
+            # Get ALL pairs directly from Bybit (native symbols)
+            all_tickers = self.fetcher.bybit.fetch_tickers()
+
+            # Filter for USDT pairs only
+            usdt_pairs = {
+                symbol: data for symbol, data in all_tickers.items()
+                if symbol.endswith('/USDT')
+            }
+
+            logger.info(f"Found {len(usdt_pairs)} USDT pairs on Bybit")
+
+            total_alerts = 0
+            total_checked = 0
+            errors = 0
+
+            for symbol, ticker in usdt_pairs.items():
+                try:
+                    price = float(ticker.get('last', 0))
+                    volume_24h = float(ticker.get('quoteVolume', 0) or 0)
+
+                    # Skip low volume pairs
+                    if volume_24h < MIN_VOLUME_24H:
+                        continue
+
+                    pair_data = {
+                        'symbol': symbol,
+                        'current_price': price,
+                        'volume_24h': volume_24h
+                    }
+
+                    # Check thresholds and fire alerts (AI finds Adjust links)
+                    alerts = await check_and_fire_alerts_with_ai(
+                        pair_data,
+                        self.send_alert
+                    )
+
+                    total_alerts += alerts
+                    total_checked += 1
+
+                except Exception as e:
+                    logger.error(f"Error processing {symbol}: {e}")
+                    errors += 1
+
+            # Log scan results
+            duration = time.time() - start_time
+            log_scan_cycle(self.scan_count, total_checked, total_alerts, errors, duration)
+
+            logger.info(
+                f"Scan #{self.scan_count} complete: "
+                f"{total_checked} pairs checked, {total_alerts} alerts, "
+                f"{errors} errors, {duration:.2f}s"
+            )
+
+        except Exception as e:
+            logger.error(f"Scan error: {e}")
+
+    async def scan_predefined_pairs(self):
+        """Traditional mode: Monitor pre-defined pairs from database"""
         start_time = time.time()
         self.scan_count += 1
 
         try:
             # Check for session reset (00:00 UTC)
             if self.session_manager.check_and_reset_session():
-                logger.info("✅ Daily session reset complete")
+                logger.info("Daily session reset complete")
 
             # Get all active pairs with Adjust links
             active_pairs = get_active_pairs()
@@ -126,7 +210,7 @@ class PriceMonitor:
             log_scan_cycle(self.scan_count, total_checked, total_alerts, errors, duration)
 
             logger.info(
-                f"✅ Scan #{self.scan_count} complete: "
+                f"Scan #{self.scan_count} complete: "
                 f"{total_checked} pairs, {total_alerts} alerts, "
                 f"{errors} errors, {duration:.2f}s"
             )
