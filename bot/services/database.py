@@ -974,21 +974,22 @@ def initialize_database():
     );
 
     -- Price snapshots (24h history + session start price)
+    -- Note: No foreign key - native Bybit mode uses pairs not in active_pairs table
     CREATE TABLE IF NOT EXISTS price_snapshots (
         id SERIAL PRIMARY KEY,
-        symbol VARCHAR(20) NOT NULL,
+        symbol VARCHAR(30) NOT NULL,
         price DECIMAL(20, 8) NOT NULL,
         volume_24h DECIMAL(20, 2),
         session_start_price DECIMAL(20, 8),
         timestamp TIMESTAMP DEFAULT NOW(),
-        source VARCHAR(10) NOT NULL,
-        FOREIGN KEY (symbol) REFERENCES active_pairs(symbol) ON DELETE CASCADE
+        source VARCHAR(10) NOT NULL
     );
 
     -- Alert history (track fired alerts per session)
+    -- Note: No foreign key to active_pairs - native Bybit mode uses pairs not in that table
     CREATE TABLE IF NOT EXISTS alert_history (
         id SERIAL PRIMARY KEY,
-        symbol VARCHAR(20) NOT NULL,
+        symbol VARCHAR(30) NOT NULL,
         threshold_percent DECIMAL NOT NULL,
         alert_type VARCHAR(10) NOT NULL,
         trigger_price DECIMAL(20, 8) NOT NULL,
@@ -997,8 +998,7 @@ def initialize_database():
         volume_24h DECIMAL(20, 2),
         telegram_message_id BIGINT,
         session_date DATE NOT NULL,
-        created_at TIMESTAMP DEFAULT NOW(),
-        FOREIGN KEY (symbol) REFERENCES active_pairs(symbol) ON DELETE CASCADE
+        created_at TIMESTAMP DEFAULT NOW()
     );
 
     -- Bot configuration

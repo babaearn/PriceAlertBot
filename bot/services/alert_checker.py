@@ -5,7 +5,7 @@ Alert Checking Logic - Threshold Detection with AI Link Finding
 from datetime import date
 import logging
 from bot.services.database import (
-    get_session_start_price,
+    get_session_start_price_native,
     save_session_start_price,
     check_alert_fired,
     log_alert
@@ -35,7 +35,7 @@ async def check_and_fire_alerts_with_ai(pair_data: dict, send_alert_callback) ->
         return 0
 
     # Get session start price (00:00 UTC)
-    session_start_price = get_session_start_price(symbol)
+    session_start_price = get_session_start_price_native(symbol)
 
     if not session_start_price:
         # First time seeing this pair, save current price as session start
