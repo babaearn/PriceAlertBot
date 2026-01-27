@@ -1,27 +1,25 @@
 """
-Price Monitoring Service - Background Scanner with APScheduler
-Supports two modes:
-1. Traditional: Monitor pre-defined pairs from database
-2. Native Bybit: Monitor ALL Bybit pairs, find Adjust links with AI
+Price Monitoring Service - Native Bybit Scanner
+Monitors ALL Bybit USDT pairs directly - NO database pair filtering
 """
 
 import asyncio
+import time
+import logging
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from bot.services.price_fetcher import PriceFetcher
-from bot.services.alert_checker import check_and_fire_alerts, check_and_fire_alerts_with_ai
 from bot.services.session_manager import SessionManager
-from bot.services.database import get_active_pairs, log_scan_cycle, save_price_snapshot, get_config_value
-from bot.config import SCAN_INTERVAL, BATCH_SIZE, TELEGRAM_GROUP_ID, PRICE_ALERTS_TOPIC_ID, MIN_VOLUME_24H
-import logging
-import time
+from bot.services.database import log_scan_cycle
+from bot.config import SCAN_INTERVAL, TELEGRAM_GROUP_ID, PRICE_ALERTS_TOPIC_ID, MIN_VOLUME_24H
 
 logger = logging.getLogger(__name__)
 
 
 class PriceMonitor:
     """
-    Background price monitoring service using REST API
-    Runs every SCAN_INTERVAL seconds (default: 30s)
+    Native Bybit price scanner
+    Fetches ALL USDT pairs directly from Bybit API
+    No database filtering - monitors everything
     """
 
     def __init__(self, bot_instance):
@@ -33,53 +31,52 @@ class PriceMonitor:
         self.is_running = True
 
     async def scan_prices(self):
-        """Main scanning loop - runs every 30 seconds"""
+        """
+        Main scan loop - fetches ALL Bybit pairs directly
+        NO database queries for pairs - gets everything from Bybit API
+        """
         if not self.is_running:
-            logger.debug("Scanner paused, skipping scan")
+            logger.debug("Scanner paused")
             return
 
-        # Check which scan mode to use
-        native_bybit_mode = get_config_value('native_bybit_mode', 'false') == 'true'
-
-        if native_bybit_mode:
-            await self.scan_all_bybit_pairs()
-        else:
-            await self.scan_predefined_pairs()
-
-    async def scan_all_bybit_pairs(self):
-        """
-        Monitor ALL Bybit pairs directly (no symbol mapping needed)
-        Find Adjust links with AI when alerts fire
-        """
         start_time = time.time()
         self.scan_count += 1
 
         try:
-            logger.info(f"Scan #{self.scan_count}: Fetching all Bybit pairs...")
-
-            # Check for session reset (00:00 UTC)
+            # Check for daily session reset (00:00 UTC)
             if self.session_manager.check_and_reset_session():
                 logger.info("Daily session reset complete")
 
-            # Get ALL pairs directly from Bybit (native symbols)
+            logger.info(f"Scan #{self.scan_count}: Fetching ALL Bybit pairs...")
+
+            # CRITICAL: Get ALL tickers directly from Bybit API
             all_tickers = self.fetcher.bybit.fetch_tickers()
 
             # Filter for USDT pairs only
             usdt_pairs = {
-                symbol: data for symbol, data in all_tickers.items()
+                symbol: ticker for symbol, ticker in all_tickers.items()
                 if symbol.endswith('/USDT')
             }
 
             logger.info(f"Found {len(usdt_pairs)} USDT pairs on Bybit")
 
-            total_alerts = 0
             total_checked = 0
+            total_alerts = 0
             errors = 0
 
+            # Import here to avoid circular imports
+            from bot.services.alert_checker import check_and_fire_alerts_with_ai
+
+            # Process each pair
             for symbol, ticker in usdt_pairs.items():
                 try:
-                    price = float(ticker.get('last', 0))
+                    # Get price and volume from ticker (already fetched!)
+                    price = float(ticker.get('last', 0) or 0)
                     volume_24h = float(ticker.get('quoteVolume', 0) or 0)
+
+                    # Skip if no price
+                    if price <= 0:
+                        continue
 
                     # Skip low volume pairs
                     if volume_24h < MIN_VOLUME_24H:
@@ -91,7 +88,7 @@ class PriceMonitor:
                         'volume_24h': volume_24h
                     }
 
-                    # Check thresholds and fire alerts (AI finds Adjust links)
+                    # Check thresholds - AI finds Adjust links when needed
                     alerts = await check_and_fire_alerts_with_ai(
                         pair_data,
                         self.send_alert
@@ -110,116 +107,17 @@ class PriceMonitor:
 
             logger.info(
                 f"Scan #{self.scan_count} complete: "
-                f"{total_checked} pairs checked, {total_alerts} alerts, "
-                f"{errors} errors, {duration:.2f}s"
-            )
-
-        except Exception as e:
-            logger.error(f"Scan error: {e}")
-
-    async def scan_predefined_pairs(self):
-        """Traditional mode: Monitor pre-defined pairs from database"""
-        start_time = time.time()
-        self.scan_count += 1
-
-        try:
-            # Check for session reset (00:00 UTC)
-            if self.session_manager.check_and_reset_session():
-                logger.info("Daily session reset complete")
-
-            # Get all active pairs with Adjust links
-            active_pairs = get_active_pairs()
-
-            if not active_pairs:
-                logger.warning("No active pairs to monitor")
-                return
-
-            logger.info(f"Scan #{self.scan_count}: Checking {len(active_pairs)} pairs")
-
-            # Split into batches for API efficiency
-            batches = [
-                active_pairs[i:i + BATCH_SIZE]
-                for i in range(0, len(active_pairs), BATCH_SIZE)
-            ]
-
-            total_alerts = 0
-            total_checked = 0
-            errors = 0
-
-            for batch_idx, batch in enumerate(batches, 1):
-                try:
-                    symbols = [pair['symbol'] for pair in batch]
-
-                    # Fetch prices for batch (REST API)
-                    prices = self.fetcher.fetch_batch_prices(symbols)
-
-                    # Check alerts for each pair in batch
-                    for pair in batch:
-                        symbol = pair['symbol']
-
-                        if symbol not in prices:
-                            logger.warning(f"No price data for {symbol}")
-                            errors += 1
-                            continue
-
-                        price_data = prices[symbol]
-
-                        # Get session start price for this symbol
-                        from bot.services.database import get_session_start_price
-                        session_start = get_session_start_price(symbol)
-
-                        # If no session start price, use current price as baseline
-                        if not session_start:
-                            session_start = price_data['price']
-
-                        # Save price snapshot
-                        save_price_snapshot(
-                            symbol=symbol,
-                            price=price_data['price'],
-                            volume_24h=price_data['volume_24h'],
-                            session_start_price=session_start,
-                            source=price_data['source']
-                        )
-
-                        pair_data = {
-                            'symbol': symbol,
-                            'current_price': price_data['price'],
-                            'volume_24h': price_data['volume_24h'],
-                            'adjust_link': pair['adjust_link']
-                        }
-
-                        # Check and fire alerts if thresholds crossed
-                        alerts = await check_and_fire_alerts(
-                            pair_data,
-                            self.send_alert
-                        )
-
-                        total_alerts += alerts
-                        total_checked += 1
-
-                    # Small delay between batches
-                    if batch_idx < len(batches):
-                        await asyncio.sleep(0.5)
-
-                except Exception as e:
-                    logger.error(f"Batch {batch_idx} error: {e}")
-                    errors += 1
-
-            # Log scan results
-            duration = time.time() - start_time
-            log_scan_cycle(self.scan_count, total_checked, total_alerts, errors, duration)
-
-            logger.info(
-                f"Scan #{self.scan_count} complete: "
                 f"{total_checked} pairs, {total_alerts} alerts, "
                 f"{errors} errors, {duration:.2f}s"
             )
 
         except Exception as e:
             logger.error(f"Scan error: {e}")
+            import traceback
+            logger.error(traceback.format_exc())
 
     async def send_alert(self, symbol, current_price, session_start_price,
-                        change_percent, adjust_link):
+                         change_percent, adjust_link):
         """Send alert to Telegram group"""
         from bot.utils.formatters import format_alert_message, create_single_cta_button
 
@@ -257,17 +155,17 @@ class PriceMonitor:
             replace_existing=True
         )
         self.scheduler.start()
-        logger.info(f"✅ Price monitor started ({SCAN_INTERVAL}s interval, REST API)")
+        logger.info(f"Price monitor started ({SCAN_INTERVAL}s interval) - Native Bybit Mode")
 
     def pause(self):
         """Pause scanning"""
         self.is_running = False
-        logger.info("⏸️ Scanner paused")
+        logger.info("Scanner paused")
 
     def resume(self):
         """Resume scanning"""
         self.is_running = True
-        logger.info("▶️ Scanner resumed")
+        logger.info("Scanner resumed")
 
     def get_status(self):
         """Get scanner status"""

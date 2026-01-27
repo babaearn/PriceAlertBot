@@ -12,206 +12,125 @@ logger = logging.getLogger(__name__)
 
 # Gemini configuration
 GEMINI_API_KEY = os.getenv('GEMINI_API_KEY')
-GEMINI_MODEL = 'gemini-2.5-flash'
 
-# Lazy-loaded Gemini client
-genai = None
-model = None
+# Lazy-loaded Gemini model
+_model = None
 
-# Known Adjust links database (loaded for AI context)
-KNOWN_LINKS_DATABASE: Dict[str, str] = {}
+# In-memory cache (faster than DB for repeated lookups)
+_memory_cache: Dict[str, Optional[str]] = {}
 
 
-def init_gemini():
-    """Initialize Gemini API client"""
-    global genai, model
+def _get_model():
+    """Get or initialize Gemini model"""
+    global _model
+
+    if _model is not None:
+        return _model
 
     if not GEMINI_API_KEY:
-        logger.warning("GEMINI_API_KEY not set, AI link finder disabled")
-        return False
+        logger.warning("GEMINI_API_KEY not set")
+        return None
 
     try:
-        import google.generativeai as genai_module
-        genai_module.configure(api_key=GEMINI_API_KEY)
-        genai = genai_module
-        model = genai.GenerativeModel(
-            GEMINI_MODEL,
-            generation_config={
-                'temperature': 0.1,  # Low temp for consistent results
-            }
+        import google.generativeai as genai
+        genai.configure(api_key=GEMINI_API_KEY)
+        _model = genai.GenerativeModel(
+            'gemini-2.5-flash',
+            generation_config={'temperature': 0.1}
         )
-        logger.info("Gemini AI initialized for Adjust link finder")
-        return True
-    except ImportError:
-        logger.warning("google-generativeai not installed, AI link finder disabled")
-        return False
+        logger.info("Gemini model initialized")
+        return _model
     except Exception as e:
-        logger.error(f"Failed to initialize Gemini: {e}")
-        return False
-
-
-def is_gemini_available() -> bool:
-    """Check if Gemini API is available"""
-    return GEMINI_API_KEY is not None and GEMINI_API_KEY != ''
-
-
-def load_known_links_database():
-    """Load known Adjust links from database for AI context"""
-    global KNOWN_LINKS_DATABASE
-
-    try:
-        from bot.services.database import get_all_known_adjust_links
-        KNOWN_LINKS_DATABASE = get_all_known_adjust_links()
-        logger.info(f"Loaded {len(KNOWN_LINKS_DATABASE)} known Adjust links for AI context")
-    except Exception as e:
-        logger.warning(f"Failed to load known links: {e}")
+        logger.error(f"Failed to init Gemini: {e}")
+        return None
 
 
 async def find_adjust_link_with_ai(bybit_symbol: str) -> Optional[str]:
     """
-    Find Mudrex Adjust link for a Bybit symbol using AI
-
-    Process:
-    1. Check cache first (instant)
-    2. If not cached, use Gemini AI to find link
-    3. Cache result for future use
-
-    Args:
-        bybit_symbol: Bybit symbol (e.g., "1000SHIB/USDT", "BTC/USDT")
-
-    Returns:
-        Adjust link URL or None if not found
+    Find Mudrex Adjust link for a Bybit symbol
+    1. Check memory cache (instant)
+    2. Check database cache (fast)
+    3. Use Gemini AI (slow, but cached)
     """
-    global model
+    # 1. Memory cache (instant)
+    if bybit_symbol in _memory_cache:
+        cached = _memory_cache[bybit_symbol]
+        if cached == '':
+            return None  # Marked as unavailable
+        return cached
 
+    # 2. Database cache
     from bot.services.database import get_cached_adjust_link, cache_adjust_link
 
-    # 1. Check cache first
-    cached = get_cached_adjust_link(bybit_symbol)
-
-    if cached is not None:
-        if cached == '':
-            # Explicitly marked as unavailable
-            logger.debug(f"Cache: {bybit_symbol} not available on Mudrex")
+    db_cached = get_cached_adjust_link(bybit_symbol)
+    if db_cached is not None:
+        _memory_cache[bybit_symbol] = db_cached
+        if db_cached == '':
             return None
-        else:
-            logger.debug(f"Cache hit: {bybit_symbol}")
-            return cached
+        return db_cached
 
-    # 2. Check if AI is available
-    if not is_gemini_available():
-        logger.debug(f"Gemini not available, skipping AI lookup for {bybit_symbol}")
+    # 3. AI lookup (only if not cached)
+    model = _get_model()
+    if not model:
         return None
 
-    # 3. Initialize Gemini if needed
-    if model is None:
-        if not init_gemini():
-            return None
+    logger.info(f"AI: Looking up {bybit_symbol}...")
 
-    # 4. Load known links if empty
-    if not KNOWN_LINKS_DATABASE:
-        load_known_links_database()
+    # Load known links for context
+    from bot.services.database import get_all_known_adjust_links
+    known_links = get_all_known_adjust_links()
+    sample_links = dict(list(known_links.items())[:30])
 
-    logger.info(f"AI: Finding Adjust link for {bybit_symbol}...")
+    prompt = f"""Find the Mudrex Adjust deeplink for Bybit symbol: {bybit_symbol}
 
-    # Prepare known links sample for AI context
-    sample_links = dict(list(KNOWN_LINKS_DATABASE.items())[:50])
-
-    prompt = f"""You are an expert at matching cryptocurrency symbols between Bybit and Mudrex exchanges.
-
-**Task:** Find the Mudrex Adjust deeplink for this Bybit trading pair.
-
-**Bybit Symbol:** {bybit_symbol}
-
-**Known Mudrex Adjust Links (reference sample):**
+Known Mudrex links (sample):
 {json.dumps(sample_links, indent=2)}
 
-**Pattern Recognition Rules:**
-1. Bybit uses: "1000SHIB/USDT", "BTC/USDT", "ETH/USDT"
-2. Mudrex might use same or variations: "SHIB1000/USDT", "1000SHIBUSDT/USDT"
-3. Try exact match first
-4. Then try common variations:
-   - Remove multiplier prefix (1000, 10000)
-   - Swap multiplier position
-   - Remove /USDT suffix for matching
+Rules:
+- Bybit: "1000SHIB/USDT" → Mudrex might be "SHIB1000/USDT" or similar
+- Match patterns: multiplier swaps, exact matches
+- Return JSON only (no markdown):
 
-**Instructions:**
-1. Search known links for exact or close matches
-2. If found, return the Adjust link
-3. If not found, return null
+If found:
+{{"found": true, "adjust_link": "https://mudrex.go.link/xxxxx"}}
 
-**Output Format (JSON only, no markdown):**
-{{
-  "found": true,
-  "mudrex_symbol": "SHIB1000",
-  "adjust_link": "https://mudrex.go.link/xxxxx"
-}}
-
-OR if not found:
-{{
-  "found": false,
-  "adjust_link": null
-}}
-
-Find link for {bybit_symbol}:"""
+If not found:
+{{"found": false, "adjust_link": null}}"""
 
     try:
         response = model.generate_content(prompt)
-        result_text = response.text.strip()
+        text = response.text.strip()
 
-        # Clean markdown if present
-        if '```' in result_text:
-            parts = result_text.split('```')
-            if len(parts) >= 2:
-                result_text = parts[1]
-                if result_text.startswith('json'):
-                    result_text = result_text[4:]
-            result_text = result_text.strip()
+        # Clean markdown
+        if '```' in text:
+            text = text.split('```')[1]
+            if text.startswith('json'):
+                text = text[4:]
+            text = text.strip()
 
-        result = json.loads(result_text)
-        adjust_link = result.get('adjust_link')
+        result = json.loads(text)
+        link = result.get('adjust_link')
 
-        if adjust_link:
-            # Cache the found link
-            cache_adjust_link(bybit_symbol, adjust_link)
-            logger.info(f"AI found: {bybit_symbol} -> {adjust_link[:50]}...")
-            return adjust_link
+        if link:
+            # Cache success
+            cache_adjust_link(bybit_symbol, link, 'ai')
+            _memory_cache[bybit_symbol] = link
+            logger.info(f"AI found: {bybit_symbol} -> {link[:40]}...")
+            return link
         else:
-            # Cache as unavailable (empty string)
-            cache_adjust_link(bybit_symbol, '')
-            logger.info(f"AI: No Mudrex link for {bybit_symbol}")
+            # Cache as unavailable
+            cache_adjust_link(bybit_symbol, '', 'ai')
+            _memory_cache[bybit_symbol] = ''
+            logger.info(f"AI: No link for {bybit_symbol}")
             return None
-
-    except json.JSONDecodeError as e:
-        logger.error(f"Failed to parse AI response for {bybit_symbol}: {e}")
-        logger.debug(f"Response was: {result_text[:200] if result_text else 'empty'}")
-        return None
 
     except Exception as e:
         logger.error(f"AI error for {bybit_symbol}: {e}")
+        # Don't cache errors - might work next time
         return None
 
 
-def find_adjust_link_sync(bybit_symbol: str) -> Optional[str]:
-    """
-    Synchronous wrapper for find_adjust_link_with_ai
-    For use in non-async contexts
-    """
-    import asyncio
-
-    try:
-        loop = asyncio.get_event_loop()
-        if loop.is_running():
-            # We're already in an async context
-            import concurrent.futures
-            with concurrent.futures.ThreadPoolExecutor() as executor:
-                future = executor.submit(
-                    asyncio.run,
-                    find_adjust_link_with_ai(bybit_symbol)
-                )
-                return future.result(timeout=30)
-        else:
-            return loop.run_until_complete(find_adjust_link_with_ai(bybit_symbol))
-    except Exception as e:
-        logger.error(f"Sync wrapper error: {e}")
-        return None
+def clear_memory_cache():
+    """Clear in-memory cache (for testing)"""
+    global _memory_cache
+    _memory_cache = {}
