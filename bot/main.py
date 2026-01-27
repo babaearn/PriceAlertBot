@@ -23,6 +23,36 @@ logging.getLogger("telegram").setLevel(logging.WARNING)
 
 logger = logging.getLogger(__name__)
 
+# 🔍 DIAGNOSTIC: Load adjust links module at startup
+logger.info("\n" + "=" * 70)
+logger.info("🔍 STARTUP DIAGNOSTICS - ADJUST LINKS VERIFICATION")
+logger.info("=" * 70)
+
+try:
+    from bot.services import adjust_links
+
+    # Get cache statistics
+    stats = adjust_links.get_cache_stats()
+
+    logger.info(f"\n📊 Adjust Links Cache Statistics:")
+    logger.info(f"   Total entries: {stats['total_entries']}")
+    logger.info(f"   Cache loaded: {'✅ YES' if stats['cache_loaded'] else '❌ NO'}")
+
+    if stats['cache_loaded']:
+        logger.info(f"   Sample symbols: {', '.join(stats['sample_symbols'][:5])}")
+        logger.info("\n✅ Adjust links module loaded successfully")
+    else:
+        logger.error("\n❌ WARNING: Adjust links cache is EMPTY!")
+        logger.error("   Alerts will NOT include adjust deeplinks!")
+
+except Exception as e:
+    logger.error(f"\n❌ CRITICAL: Failed to load adjust_links module: {e}")
+    import traceback
+    logger.error(traceback.format_exc())
+    logger.error("⚠️  Bot will start but alerts will NOT have adjust links!")
+
+logger.info("=" * 70 + "\n")
+
 
 async def post_init(application: Application):
     """Initialize services after bot starts"""
