@@ -45,6 +45,16 @@ async def post_init(application: Application):
     """Initialize services after bot starts"""
     logger.info("🚀 Bot started successfully")
 
+    # CRITICAL: Sync session prices on startup
+    # This ensures all pairs have a baseline price for % calculations
+    logger.info("🔄 Syncing session prices...")
+    try:
+        from bot.services.session_manager import sync_session_prices
+        synced = await sync_session_prices()
+        logger.info(f"✅ Session sync complete: {synced} pairs")
+    except Exception as e:
+        logger.error(f"⚠️ Session sync failed: {e}")
+
     # Start price monitoring service
     monitor = PriceMonitor(application.bot)
     monitor.start()
@@ -90,6 +100,9 @@ def main():
         application.add_handler(CommandHandler("volume", admin_commands.volume_command))
         application.add_handler(CommandHandler("interval", admin_commands.interval_command))
         application.add_handler(CommandHandler("show", admin_commands.show_command))
+        application.add_handler(CommandHandler("resetsession", admin_commands.resetsession_command))
+        application.add_handler(CommandHandler("syncprices", admin_commands.syncprices_command))
+        application.add_handler(CommandHandler("testalert", admin_commands.testalert_command))
 
         # Control commands
         application.add_handler(CommandHandler("pause", control_commands.pause_command))

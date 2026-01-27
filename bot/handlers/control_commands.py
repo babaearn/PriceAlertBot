@@ -44,42 +44,53 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     is_user_admin = is_admin(user_id)
 
     help_text = """
-🤖 <b>Available Commands</b>
+🤖 <b>Price Alert Bot - Commands</b>
 
-<b>General:</b>
+<b>📊 Status Commands:</b>
 /start - Welcome message
 /help - Show this help
 /status - Check scanner status
 /stats - View statistics
-/listpairs - Show all monitored pairs
 /test - Health check all services
 """
 
     if is_user_admin:
         help_text += """
-<b>Admin Commands:</b>
+<b>🔧 Admin Commands:</b>
+
+<b>Scanner Control:</b>
+/pause - Pause price scanning
+/resume - Resume price scanning
+/interval &lt;time&gt; - Set scan interval
+  • /interval 30s or /interval 1m
+
+<b>Configuration:</b>
+/volume &lt;amount&gt; - Set volume threshold
+  • /volume 5M or /volume 10M
+/show - Show filtered pairs
+/show all - List all 474+ pairs
+/show stats - Detailed statistics
+
+<b>Session Management:</b>
+/resetsession - Reset to current prices
+/syncprices - Info about session sync
+
+<b>Pair Management:</b>
 /addnew - Add new pair(s)
-  • Single: /addnew BTC https://link.com/btc
-  • Bulk: /addnew BTC link1 ETH link2
-
 /removepair - Remove pair
-  • /removepair BTC
-
 /cooldown - Set alert cooldown
-  • /cooldown 30m
-  • /cooldown 1h
-  • /cooldown off
 
-/pause - Pause scanner
-/resume - Resume scanner
+<b>Testing:</b>
+/testalert - Send test alert
 """
 
     help_text += """
-<b>Features:</b>
-• 30-second price monitoring
-• Session-based alerts (resets daily at 00:00 UTC)
-• Volume filtering ($5M minimum)
-• Bybit + Binance fallback APIs
+<b>💡 How It Works:</b>
+• Scans every 30 seconds (configurable)
+• Session resets daily at 00:00 UTC
+• Only pairs with $5M+ volume monitored
+• Alerts at: ±10%, ±30%, ±60%, ±80%, ±100%
+• Then every ±50% beyond 100%
 """
 
     await update.message.reply_text(help_text.strip(), parse_mode='HTML')

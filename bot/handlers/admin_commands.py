@@ -948,3 +948,122 @@ async def show_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     except Exception as e:
         logger.error(f"Error in show command: {e}")
         await update.message.reply_text(f"❌ Error: {e}")
+
+
+async def resetsession_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """
+    Manually reset session to current prices
+    Usage: /resetsession
+
+    This sets all session start prices to CURRENT prices,
+    effectively resetting the baseline for % change calculations.
+    Also clears today's alert history so alerts can fire again.
+    """
+    user_id = update.effective_user.id
+
+    if not is_admin(user_id):
+        await update.message.reply_text("❌ Access denied. Admin only.")
+        return
+
+    await update.message.reply_text("🔄 <b>Resetting session...</b>\n\nThis may take a few seconds.", parse_mode='HTML')
+
+    try:
+        from bot.services.session_manager import reset_session_full
+
+        # Full reset
+        synced = await reset_session_full()
+
+        if synced > 0:
+            await update.message.reply_text(
+                f"✅ <b>Session Reset Complete!</b>\n\n"
+                f"📊 {synced} pairs synced to current prices\n"
+                f"🗑️ Today's alert history cleared\n\n"
+                f"⏱️ Next scan will compare to these new baseline prices\n"
+                f"📈 Alerts will fire when prices move ±10% from now",
+                parse_mode='HTML'
+            )
+        else:
+            await update.message.reply_text("❌ Session reset failed. Check logs for details.")
+
+    except Exception as e:
+        logger.error(f"Error in resetsession command: {e}")
+        await update.message.reply_text(f"❌ Reset failed: {e}")
+
+
+async def syncprices_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """
+    Sync session prices (info command)
+    Usage: /syncprices
+    """
+    user_id = update.effective_user.id
+
+    if not is_admin(user_id):
+        await update.message.reply_text("❌ Access denied. Admin only.")
+        return
+
+    await update.message.reply_text(
+        "ℹ️ <b>Session Price Sync</b>\n\n"
+        "<b>How it works:</b>\n"
+        "• Session prices are set when bot starts\n"
+        "• They reset automatically at 00:00 UTC\n"
+        "• % changes are calculated from session start\n\n"
+        "<b>After Deployment:</b>\n"
+        "Session prices are set to current market prices.\n"
+        "Alerts will fire when prices move ±10% from that point.\n\n"
+        "<b>Manual Reset:</b>\n"
+        "Use <code>/resetsession</code> to:\n"
+        "• Reset all prices to current values\n"
+        "• Clear today's alert history\n"
+        "• Allow alerts to fire again\n\n"
+        "<b>💡 Best Practice:</b>\n"
+        "Keep bot running 24/7 to capture true 00:00 UTC prices!",
+        parse_mode='HTML'
+    )
+
+
+async def testalert_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """
+    Send a test alert to verify bot is working
+    Usage: /testalert
+    """
+    user_id = update.effective_user.id
+
+    if not is_admin(user_id):
+        await update.message.reply_text("❌ Access denied. Admin only.")
+        return
+
+    try:
+        from bot.utils.formatters import format_alert_message, create_single_cta_button
+        from bot import config
+
+        # Create test alert
+        test_symbol = "TEST/USDT"
+        test_price = 1.2345
+        test_session_price = 1.0000
+        test_change = 23.45
+
+        message = format_alert_message(
+            test_symbol,
+            test_price,
+            test_session_price,
+            test_change
+        )
+
+        button = create_single_cta_button(test_symbol, test_change, "https://mudrex.go.link/test")
+
+        # Send to current chat
+        await update.message.reply_text(
+            f"🧪 <b>TEST ALERT</b>\n\n{message}",
+            parse_mode='HTML',
+            reply_markup=button
+        )
+
+        await update.message.reply_text(
+            "✅ Test alert sent!\n\n"
+            "If you see the alert above with the CTA button, "
+            "the bot is working correctly."
+        )
+
+    except Exception as e:
+        logger.error(f"Error in testalert command: {e}")
+        await update.message.reply_text(f"❌ Test failed: {e}")
