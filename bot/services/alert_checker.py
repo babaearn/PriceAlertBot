@@ -40,10 +40,15 @@ async def check_and_fire_alerts_with_ai(pair_data: dict, send_alert_callback) ->
     if not session_start_price:
         # First time seeing this pair, save current price as session start
         save_session_start_price(symbol, current_price)
+        logger.debug(f"📝 {symbol}: New pair, saved session start ${current_price:,.4f}")
         return 0
 
     # Calculate % change from session start
     change_percent = ((current_price - session_start_price) / session_start_price) * 100
+
+    # Log significant moves (>5%) for debugging
+    if abs(change_percent) >= 5:
+        logger.info(f"📊 {symbol}: {change_percent:+.2f}% (${session_start_price:,.4f} → ${current_price:,.4f})")
 
     # Quick check - skip if change is too small
     min_threshold = min(GAINER_THRESHOLDS[0] if GAINER_THRESHOLDS else 100,
@@ -66,6 +71,8 @@ async def check_and_fire_alerts_with_ai(pair_data: dict, send_alert_callback) ->
     if not thresholds_crossed:
         return 0
 
+    logger.info(f"🎯 {symbol}: Crossed thresholds {thresholds_crossed} ({change_percent:+.2f}%)")
+
     # Fire alerts for new threshold crossings
     alerts_fired = 0
     today = date.today()
@@ -73,6 +80,7 @@ async def check_and_fire_alerts_with_ai(pair_data: dict, send_alert_callback) ->
     for threshold in thresholds_crossed:
         # Skip if already fired today
         if check_alert_fired(symbol, threshold, today):
+            logger.debug(f"⏭️ {symbol}: Already fired {threshold}% today")
             continue
 
         # AI: Find Adjust link (with caching)
@@ -80,11 +88,12 @@ async def check_and_fire_alerts_with_ai(pair_data: dict, send_alert_callback) ->
         adjust_link = await find_adjust_link_with_ai(symbol)
 
         if not adjust_link:
-            logger.debug(f"Skipping {symbol}: No Adjust link")
+            logger.warning(f"⚠️ {symbol}: No Adjust link found - skipping alert")
             continue
 
         try:
             # Send alert
+            logger.info(f"🚀 FIRING ALERT: {symbol} {change_percent:+.1f}% (threshold: {threshold}%)")
             message_id = await send_alert_callback(
                 symbol=symbol,
                 current_price=current_price,
@@ -106,9 +115,9 @@ async def check_and_fire_alerts_with_ai(pair_data: dict, send_alert_callback) ->
             )
 
             alerts_fired += 1
-            logger.info(f"Alert: {symbol} {change_percent:+.1f}% (threshold: {threshold}%)")
+            logger.info(f"✅ Alert sent: {symbol} {change_percent:+.1f}% (threshold: {threshold}%)")
 
         except Exception as e:
-            logger.error(f"Alert failed for {symbol}: {e}")
+            logger.error(f"❌ Alert failed for {symbol}: {e}")
 
     return alerts_fired
