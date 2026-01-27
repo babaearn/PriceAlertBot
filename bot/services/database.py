@@ -794,6 +794,7 @@ def seed_initial_pairs(force_reseed=False):
 def get_cached_adjust_link(bybit_symbol: str) -> Optional[str]:
     """
     Get cached Adjust link for a Bybit symbol
+    Checks both adjust_link_cache AND active_pairs tables
 
     Returns:
         - URL string if found
@@ -803,6 +804,7 @@ def get_cached_adjust_link(bybit_symbol: str) -> Optional[str]:
     conn = get_connection()
     try:
         with conn.cursor() as cur:
+            # First check the cache table
             cur.execute("""
                 SELECT adjust_link FROM adjust_link_cache
                 WHERE bybit_symbol = %s
@@ -811,6 +813,18 @@ def get_cached_adjust_link(bybit_symbol: str) -> Optional[str]:
             result = cur.fetchone()
             if result is not None:
                 return result[0]  # Returns URL or empty string
+
+            # Also check active_pairs table (has 438+ pre-loaded links)
+            cur.execute("""
+                SELECT adjust_link FROM active_pairs
+                WHERE symbol = %s AND status = 'active'
+                AND adjust_link IS NOT NULL AND adjust_link != ''
+            """, (bybit_symbol,))
+
+            result = cur.fetchone()
+            if result is not None:
+                return result[0]
+
             return None  # Not cached
 
     except Exception as e:

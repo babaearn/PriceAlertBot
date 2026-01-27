@@ -59,14 +59,16 @@ async def find_adjust_link_with_ai(bybit_symbol: str) -> Optional[str]:
             return None  # Marked as unavailable
         return cached
 
-    # 2. Database cache
+    # 2. Database cache (checks both adjust_link_cache AND active_pairs tables)
     from bot.services.database import get_cached_adjust_link, cache_adjust_link
 
     db_cached = get_cached_adjust_link(bybit_symbol)
     if db_cached is not None:
         _memory_cache[bybit_symbol] = db_cached
         if db_cached == '':
+            logger.debug(f"🚫 {bybit_symbol}: Marked as unavailable in DB")
             return None
+        logger.debug(f"✅ {bybit_symbol}: Found link in DB")
         return db_cached
 
     # 3. AI lookup (only if not cached)
