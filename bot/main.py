@@ -87,6 +87,9 @@ def main():
         application.add_handler(CommandHandler("ai", admin_commands.ai_toggle_command))
         application.add_handler(CommandHandler("nativebybit", admin_commands.nativebybit_command))
         application.add_handler(CommandHandler("seedlinks", admin_commands.seedlinks_command))
+        application.add_handler(CommandHandler("volume", admin_commands.volume_command))
+        application.add_handler(CommandHandler("interval", admin_commands.interval_command))
+        application.add_handler(CommandHandler("show", admin_commands.show_command))
 
         # Control commands
         application.add_handler(CommandHandler("pause", control_commands.pause_command))

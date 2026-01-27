@@ -593,3 +593,358 @@ async def seedlinks_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     except Exception as e:
         logger.error(f"Error in seedlinks command: {e}")
         await update.message.reply_text(f"❌ Seeding failed: {e}")
+
+
+def format_volume(volume: float) -> str:
+    """Format volume in human-readable format"""
+    if volume >= 1_000_000_000:
+        return f"${volume/1_000_000_000:.1f}B"
+    elif volume >= 1_000_000:
+        return f"${volume/1_000_000:.1f}M"
+    elif volume >= 1_000:
+        return f"${volume/1_000:.1f}K"
+    else:
+        return f"${volume:.0f}"
+
+
+async def volume_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """
+    Set minimum volume threshold
+    Usage: /volume <amount> or /volume 5M or /volume reset
+    """
+    user_id = update.effective_user.id
+
+    if not is_admin(user_id):
+        await update.message.reply_text("❌ Access denied. Admin only.")
+        return
+
+    args = context.args
+
+    # Show current setting
+    if not args:
+        current = int(get_config_value('min_volume_usd', '5000000'))
+        await update.message.reply_text(
+            f"📊 <b>Current Volume Threshold</b>\n\n"
+            f"💰 ${current:,.0f}\n"
+            f"({format_volume(current)})\n\n"
+            f"💡 Usage: <code>/volume 10M</code> or <code>/volume 5000000</code>",
+            parse_mode='HTML'
+        )
+        return
+
+    value_str = args[0].upper()
+
+    # Reset to default
+    if value_str == 'RESET':
+        new_volume = 5_000_000
+        set_config_value('min_volume_usd', str(new_volume), str(user_id))
+        await update.message.reply_text(
+            f"🔄 <b>Volume Threshold Reset</b>\n\n"
+            f"💰 ${new_volume:,.0f} (Default)\n\n"
+            f"✅ Takes effect on next scan",
+            parse_mode='HTML'
+        )
+        return
+
+    # Parse value
+    try:
+        if value_str.endswith('B'):
+            new_volume = int(float(value_str[:-1]) * 1_000_000_000)
+        elif value_str.endswith('M'):
+            new_volume = int(float(value_str[:-1]) * 1_000_000)
+        elif value_str.endswith('K'):
+            new_volume = int(float(value_str[:-1]) * 1_000)
+        else:
+            new_volume = int(value_str)
+
+        # Validate range
+        if new_volume < 100_000:
+            await update.message.reply_text(
+                "❌ <b>Too Low</b>\n\n"
+                "Minimum: $100,000 (100K)\n"
+                "This prevents tracking too many low-volume pairs",
+                parse_mode='HTML'
+            )
+            return
+
+        if new_volume > 10_000_000_000:
+            await update.message.reply_text(
+                "❌ <b>Too High</b>\n\n"
+                "Maximum: $10,000,000,000 (10B)\n"
+                "This would filter out almost all pairs",
+                parse_mode='HTML'
+            )
+            return
+
+        # Get old value
+        old_volume = int(get_config_value('min_volume_usd', '5000000'))
+
+        # Update setting
+        set_config_value('min_volume_usd', str(new_volume), str(user_id))
+
+        await update.message.reply_text(
+            f"✅ <b>Volume Threshold Updated</b>\n\n"
+            f"Old: ${old_volume:,.0f}\n"
+            f"New: ${new_volume:,.0f}\n\n"
+            f"⏱️ Takes effect on next scan",
+            parse_mode='HTML'
+        )
+
+    except ValueError:
+        await update.message.reply_text(
+            "❌ <b>Invalid Format</b>\n\n"
+            "Examples:\n"
+            "• <code>/volume 5000000</code>\n"
+            "• <code>/volume 5M</code>\n"
+            "• <code>/volume 1.5B</code>\n"
+            "• <code>/volume reset</code>",
+            parse_mode='HTML'
+        )
+
+
+async def interval_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """
+    Change scan interval
+    Usage: /interval 30s or /interval 1m
+    """
+    user_id = update.effective_user.id
+
+    if not is_admin(user_id):
+        await update.message.reply_text("❌ Access denied. Admin only.")
+        return
+
+    args = context.args
+
+    # Show current setting
+    if not args:
+        from bot import config
+        current = int(get_config_value('scan_interval_seconds', str(config.SCAN_INTERVAL)))
+        scans_per_hour = 3600 // current
+
+        await update.message.reply_text(
+            f"⏱️ <b>Current Scan Interval</b>\n\n"
+            f"🔄 {current} seconds\n\n"
+            f"📊 <b>Stats:</b>\n"
+            f"• Scans/hour: {scans_per_hour}\n"
+            f"• Scans/day: {scans_per_hour * 24:,}\n\n"
+            f"💡 Usage: <code>/interval 15s</code> or <code>/interval 1m</code>",
+            parse_mode='HTML'
+        )
+        return
+
+    value_str = args[0].upper()
+
+    # Reset
+    if value_str == 'RESET':
+        new_interval = 30
+        set_config_value('scan_interval_seconds', str(new_interval), str(user_id))
+        await update.message.reply_text(
+            f"🔄 <b>Scan Interval Reset</b>\n\n"
+            f"⏱️ {new_interval} seconds (Default)\n\n"
+            f"⚠️ Restart bot to apply new interval",
+            parse_mode='HTML'
+        )
+        return
+
+    # Parse interval
+    try:
+        if value_str.endswith('S'):
+            new_interval = int(value_str[:-1])
+        elif value_str.endswith('M'):
+            new_interval = int(float(value_str[:-1]) * 60)
+        else:
+            new_interval = int(value_str)
+
+        # Validate
+        if new_interval < 5:
+            await update.message.reply_text(
+                "❌ <b>Too Fast</b>\n\n"
+                "Minimum: 5 seconds\n\n"
+                "⚠️ Going below 5s may cause API issues",
+                parse_mode='HTML'
+            )
+            return
+
+        if new_interval > 300:
+            await update.message.reply_text(
+                "❌ <b>Too Slow</b>\n\n"
+                "Maximum: 300 seconds (5 minutes)",
+                parse_mode='HTML'
+            )
+            return
+
+        # Get old value
+        from bot import config
+        old_interval = int(get_config_value('scan_interval_seconds', str(config.SCAN_INTERVAL)))
+
+        # Update setting
+        set_config_value('scan_interval_seconds', str(new_interval), str(user_id))
+
+        old_scans = 3600 // old_interval
+        new_scans = 3600 // new_interval
+        change_pct = ((new_scans - old_scans) / old_scans * 100) if old_scans > 0 else 0
+
+        await update.message.reply_text(
+            f"✅ <b>Scan Interval Updated</b>\n\n"
+            f"Old: {old_interval} seconds\n"
+            f"New: {new_interval} seconds\n\n"
+            f"📊 <b>Impact:</b>\n"
+            f"• Scans/hour: {old_scans} → {new_scans} ({change_pct:+.0f}%)\n\n"
+            f"⚠️ Restart bot to apply new interval",
+            parse_mode='HTML'
+        )
+
+    except ValueError:
+        await update.message.reply_text(
+            "❌ <b>Invalid Format</b>\n\n"
+            "Examples:\n"
+            "• <code>/interval 30s</code>\n"
+            "• <code>/interval 1m</code>\n"
+            "• <code>/interval 15s</code>\n"
+            "• <code>/interval reset</code>",
+            parse_mode='HTML'
+        )
+
+
+async def show_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """
+    Show currently monitored pairs
+    /show - Show filtered pairs (meeting volume threshold)
+    /show all - Show all available Bybit USDT pairs
+    /show stats - Show detailed statistics
+    """
+    user_id = update.effective_user.id
+
+    if not is_admin(user_id):
+        await update.message.reply_text("❌ Access denied. Admin only.")
+        return
+
+    args = context.args
+    mode = args[0].lower() if args else 'filtered'
+
+    await update.message.reply_text("🔄 Fetching market data...")
+
+    try:
+        from bot.services.price_fetcher import PriceFetcher
+        from bot import config
+
+        # Get current settings
+        min_volume = int(get_config_value('min_volume_usd', str(config.MIN_VOLUME_24H)))
+
+        # Fetch current market data
+        fetcher = PriceFetcher()
+        all_tickers = fetcher.bybit.fetch_tickers()
+
+        # Filter USDT pairs
+        usdt_pairs = {
+            symbol: ticker for symbol, ticker in all_tickers.items()
+            if symbol.endswith('/USDT')
+        }
+
+        # Sort by volume
+        sorted_pairs = sorted(
+            usdt_pairs.items(),
+            key=lambda x: float(x[1].get('quoteVolume', 0) or 0),
+            reverse=True
+        )
+
+        # Separate qualified vs unqualified
+        qualified = []
+        for symbol, ticker in sorted_pairs:
+            volume = float(ticker.get('quoteVolume', 0) or 0)
+            if volume >= min_volume:
+                qualified.append((symbol, volume))
+
+        # MODE: Filtered (default) - show only qualified pairs
+        if mode == 'filtered':
+            if not qualified:
+                await update.message.reply_text(
+                    f"📊 <b>No pairs meet threshold</b>\n\n"
+                    f"Volume threshold: {format_volume(min_volume)}\n"
+                    f"Total pairs on Bybit: {len(usdt_pairs)}\n\n"
+                    f"💡 Try lowering threshold: <code>/volume 1M</code>",
+                    parse_mode='HTML'
+                )
+                return
+
+            # Show qualified pairs (max 30)
+            display_pairs = qualified[:30]
+            pairs_list = "\n".join([
+                f"{i+1}. {symbol:14} {format_volume(vol)}"
+                for i, (symbol, vol) in enumerate(display_pairs)
+            ])
+
+            more_text = f"\n... and {len(qualified) - 30} more" if len(qualified) > 30 else ""
+
+            await update.message.reply_text(
+                f"📊 <b>Filtered Pairs</b> (Volume ≥ {format_volume(min_volume)})\n\n"
+                f"✅ <b>{len(qualified)} pairs qualified:</b>\n\n"
+                f"<code>{pairs_list}</code>{more_text}\n\n"
+                f"💡 <code>/show all</code> - See all {len(usdt_pairs)} pairs\n"
+                f"💡 <code>/volume 10M</code> - Change threshold",
+                parse_mode='HTML'
+            )
+
+        # MODE: All pairs
+        elif mode == 'all':
+            # Show all pairs (max 50)
+            display_pairs = sorted_pairs[:50]
+            pairs_list = "\n".join([
+                f"{i+1}. {symbol:14} {format_volume(float(ticker.get('quoteVolume', 0) or 0))} {'✅' if float(ticker.get('quoteVolume', 0) or 0) >= min_volume else '❌'}"
+                for i, (symbol, ticker) in enumerate(display_pairs)
+            ])
+
+            await update.message.reply_text(
+                f"📊 <b>All Bybit USDT Pairs</b>\n\n"
+                f"Total: {len(usdt_pairs)} pairs\n"
+                f"Qualified (≥{format_volume(min_volume)}): {len(qualified)}\n\n"
+                f"<b>Top 50 by volume:</b>\n"
+                f"<code>{pairs_list}</code>\n"
+                f"... and {len(usdt_pairs) - 50} more\n\n"
+                f"✅ = Meets volume threshold\n"
+                f"❌ = Below threshold",
+                parse_mode='HTML'
+            )
+
+        # MODE: Stats
+        elif mode == 'stats':
+            total_volume = sum(vol for _, vol in qualified) if qualified else 0
+            avg_volume = total_volume / len(qualified) if qualified else 0
+
+            # Volume distribution
+            mega = sum(1 for _, vol in qualified if vol >= 100_000_000)
+            large = sum(1 for _, vol in qualified if 50_000_000 <= vol < 100_000_000)
+            mid = sum(1 for _, vol in qualified if 10_000_000 <= vol < 50_000_000)
+            small = sum(1 for _, vol in qualified if vol < 10_000_000)
+
+            await update.message.reply_text(
+                f"📊 <b>Detailed Statistics</b>\n\n"
+                f"<b>Filter:</b> {format_volume(min_volume)}\n"
+                f"<b>Total on Bybit:</b> {len(usdt_pairs)}\n"
+                f"<b>Qualified:</b> {len(qualified)} ({len(qualified)/len(usdt_pairs)*100:.1f}%)\n\n"
+                f"<b>Volume Breakdown:</b>\n"
+                f"• Mega (≥$100M): {mega}\n"
+                f"• Large ($50M-$100M): {large}\n"
+                f"• Mid ($10M-$50M): {mid}\n"
+                f"• Small (&lt;$10M): {small}\n\n"
+                f"<b>Volume Stats:</b>\n"
+                f"• Total: {format_volume(total_volume)}\n"
+                f"• Average: {format_volume(avg_volume)}\n"
+                f"• Highest: {format_volume(qualified[0][1]) if qualified else 0}\n"
+                f"• Lowest: {format_volume(qualified[-1][1]) if qualified else 0}",
+                parse_mode='HTML'
+            )
+
+        else:
+            await update.message.reply_text(
+                "❌ <b>Invalid option</b>\n\n"
+                "Usage:\n"
+                "• <code>/show</code> - Filtered pairs only\n"
+                "• <code>/show all</code> - All Bybit pairs\n"
+                "• <code>/show stats</code> - Detailed statistics",
+                parse_mode='HTML'
+            )
+
+    except Exception as e:
+        logger.error(f"Error in show command: {e}")
+        await update.message.reply_text(f"❌ Error: {e}")
