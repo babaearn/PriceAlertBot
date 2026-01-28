@@ -8,6 +8,7 @@ Fallback Links:
 
 from datetime import date
 import logging
+import threading
 from typing import Set, Tuple
 from bot.services.database import (
     get_session_start_price_native,
@@ -27,12 +28,16 @@ FALLBACK_LOSER_LINK = "https://mudrex.go.link/TopLosers"
 # Format: Set of (symbol, threshold, date) tuples
 _fired_alerts_cache: Set[Tuple[str, int, date]] = set()
 
+# Thread lock for cache operations (defense-in-depth even with max_instances=1)
+_cache_lock = threading.Lock()
+
 
 def clear_fired_alerts_cache():
     """Clear in-memory alert cache (called on session reset)"""
     global _fired_alerts_cache
-    _fired_alerts_cache = set()
-    logger.info("🗑️ Cleared fired alerts cache")
+    with _cache_lock:
+        _fired_alerts_cache = set()
+        logger.info("🗑️ Cleared fired alerts cache")
 
 
 async def check_and_fire_alerts_with_ai(pair_data: dict, send_alert_callback) -> int:
@@ -95,22 +100,27 @@ async def check_and_fire_alerts_with_ai(pair_data: dict, send_alert_callback) ->
 
     # Fire alerts for new threshold crossings
     alerts_fired = 0
-    today = date.today()
+    # CRITICAL: Use UTC date for consistency with database
+    from datetime import datetime
+    today = datetime.utcnow().date()
 
     for threshold in thresholds_crossed:
         # Create cache key
         cache_key = (symbol, threshold, today)
 
         # FAST CHECK: In-memory cache (prevents rapid duplicates)
-        if cache_key in _fired_alerts_cache:
-            logger.debug(f"⏭️ {symbol}: Already fired {threshold}% (cached)")
-            continue
+        # Use lock to prevent race conditions
+        with _cache_lock:
+            if cache_key in _fired_alerts_cache:
+                logger.debug(f"⏭️ {symbol}: Already fired {threshold}% (cached)")
+                continue
 
         # SLOW CHECK: Database (persistent across restarts)
         if check_alert_fired(symbol, threshold, today):
             logger.debug(f"⏭️ {symbol}: Already fired {threshold}% (DB)")
             # Add to cache so we don't check DB again
-            _fired_alerts_cache.add(cache_key)
+            with _cache_lock:
+                _fired_alerts_cache.add(cache_key)
             continue
 
         # AI: Find Adjust link (with caching)
@@ -130,7 +140,8 @@ async def check_and_fire_alerts_with_ai(pair_data: dict, send_alert_callback) ->
 
         try:
             # CRITICAL: Add to cache IMMEDIATELY to prevent duplicates in next scan
-            _fired_alerts_cache.add(cache_key)
+            with _cache_lock:
+                _fired_alerts_cache.add(cache_key)
 
             # Send alert
             logger.info(f"🚀 FIRING ALERT: {symbol} {change_percent:+.1f}% (threshold: {threshold}%)")
@@ -160,6 +171,7 @@ async def check_and_fire_alerts_with_ai(pair_data: dict, send_alert_callback) ->
         except Exception as e:
             logger.error(f"❌ Alert failed for {symbol}: {e}")
             # Remove from cache if send failed
-            _fired_alerts_cache.discard(cache_key)
+            with _cache_lock:
+                _fired_alerts_cache.discard(cache_key)
 
     return alerts_fired

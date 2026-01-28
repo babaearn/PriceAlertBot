@@ -32,7 +32,7 @@ class PriceMonitor:
         # Configure scheduler with error handling
         job_defaults = {
             'coalesce': False,  # Run all missed executions
-            'max_instances': 3,  # Allow up to 3 concurrent instances
+            'max_instances': 1,  # CRITICAL: Only ONE scan at a time to prevent race conditions
             'misfire_grace_time': 60  # Jobs can be 60s late
         }
         self.scheduler = AsyncIOScheduler(job_defaults=job_defaults)
