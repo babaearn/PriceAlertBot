@@ -736,12 +736,24 @@ async def interval_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     # Reset
     if value_str == 'RESET':
+        from bot.handlers import control_commands
         new_interval = 30
         set_config_value('scan_interval_seconds', str(new_interval), str(user_id))
+
+        # Apply immediately if monitor is available
+        applied_live = False
+        if control_commands.price_monitor:
+            try:
+                applied_live = control_commands.price_monitor.update_interval(new_interval)
+            except Exception as e:
+                logger.error(f"Failed to apply interval live: {e}")
+
+        status_msg = "✅ Applied immediately" if applied_live else "⚠️ Restart bot to apply"
+
         await update.message.reply_text(
             f"🔄 <b>Scan Interval Reset</b>\n\n"
             f"⏱️ {new_interval} seconds (Default)\n\n"
-            f"⚠️ Restart bot to apply new interval",
+            f"{status_msg}",
             parse_mode='HTML'
         )
         return
@@ -775,14 +787,25 @@ async def interval_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
         # Get old value
         from bot import config
+        from bot.handlers import control_commands
         old_interval = int(get_config_value('scan_interval_seconds', str(config.SCAN_INTERVAL)))
 
-        # Update setting
+        # Update setting in database
         set_config_value('scan_interval_seconds', str(new_interval), str(user_id))
+
+        # Apply immediately if monitor is available
+        applied_live = False
+        if control_commands.price_monitor:
+            try:
+                applied_live = control_commands.price_monitor.update_interval(new_interval)
+            except Exception as e:
+                logger.error(f"Failed to apply interval live: {e}")
 
         old_scans = 3600 // old_interval
         new_scans = 3600 // new_interval
         change_pct = ((new_scans - old_scans) / old_scans * 100) if old_scans > 0 else 0
+
+        status_msg = "✅ Applied immediately - No restart needed!" if applied_live else "⚠️ Restart bot to apply"
 
         await update.message.reply_text(
             f"✅ <b>Scan Interval Updated</b>\n\n"
@@ -790,7 +813,7 @@ async def interval_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
             f"New: {new_interval} seconds\n\n"
             f"📊 <b>Impact:</b>\n"
             f"• Scans/hour: {old_scans} → {new_scans} ({change_pct:+.0f}%)\n\n"
-            f"⚠️ Restart bot to apply new interval",
+            f"{status_msg}",
             parse_mode='HTML'
         )
 

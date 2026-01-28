@@ -241,6 +241,28 @@ class PriceMonitor:
         self.is_running = True
         logger.info("Scanner resumed")
 
+    def update_interval(self, new_interval_seconds: int):
+        """
+        Dynamically update scan interval without restarting bot
+        Reschedules the price scanner job with new interval
+        """
+        try:
+            logger.info(f"🔄 Updating scan interval: {new_interval_seconds}s")
+
+            # Reschedule the price scanner job with new interval
+            self.scheduler.reschedule_job(
+                job_id='price_scanner',
+                trigger='interval',
+                seconds=new_interval_seconds
+            )
+
+            logger.info(f"✅ Scan interval updated to {new_interval_seconds}s (live)")
+            return True
+
+        except Exception as e:
+            logger.error(f"Failed to update scan interval: {e}")
+            return False
+
     def get_status(self):
         """Get scanner status"""
         return {
