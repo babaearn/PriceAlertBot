@@ -49,8 +49,9 @@ async def find_adjust_link_with_ai(bybit_symbol: str) -> Optional[str]:
     """
     Find Mudrex Adjust link for a Bybit symbol
     1. Check memory cache (instant)
-    2. Check database cache (fast)
-    3. Use Gemini AI (slow, but cached)
+    2. Check JSON file cache (fast) ← NEW!
+    3. Check database cache (fast)
+    4. Use Gemini AI (slow, but cached)
     """
     # 1. Memory cache (instant)
     if bybit_symbol in _memory_cache:
@@ -59,7 +60,16 @@ async def find_adjust_link_with_ai(bybit_symbol: str) -> Optional[str]:
             return None  # Marked as unavailable
         return cached
 
-    # 2. Database cache (checks both adjust_link_cache AND active_pairs tables)
+    # 2. JSON file cache (from data/adjust_links.json) ← CRITICAL FIX!
+    from bot.services.adjust_links import find_adjust_link
+
+    json_cached = find_adjust_link(bybit_symbol)
+    if json_cached:
+        _memory_cache[bybit_symbol] = json_cached
+        logger.info(f"✅ {bybit_symbol}: Found link in JSON cache -> {json_cached}")
+        return json_cached
+
+    # 3. Database cache (checks both adjust_link_cache AND active_pairs tables)
     from bot.services.database import get_cached_adjust_link, cache_adjust_link
 
     db_cached = get_cached_adjust_link(bybit_symbol)
@@ -71,7 +81,7 @@ async def find_adjust_link_with_ai(bybit_symbol: str) -> Optional[str]:
         logger.debug(f"✅ {bybit_symbol}: Found link in DB")
         return db_cached
 
-    # 3. AI lookup (only if not cached)
+    # 4. AI lookup (only if not found in any cache)
     model = _get_model()
     if not model:
         return None
