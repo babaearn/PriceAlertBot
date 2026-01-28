@@ -1,99 +1,64 @@
 """
-Price Fetching Service - REST API with CCXT
-Primary: Bybit | Fallback: Binance
+Price Fetching Service - Bybit REST API via CCXT
+Simple wrapper for Bybit API - scanner uses fetch_tickers() directly
 """
 
 import ccxt
-from typing import List, Dict
 import logging
-from tenacity import retry, stop_after_attempt, wait_fixed
 
 logger = logging.getLogger(__name__)
 
 
 class PriceFetcher:
     """
-    Fetch prices via REST API using CCXT
-    Primary: Bybit | Fallback: Binance
+    Simple Bybit API wrapper using CCXT
+    Scanner uses self.bybit.fetch_tickers() directly for ALL pairs
     """
 
     def __init__(self):
+        # Bybit - Primary exchange
         self.bybit = ccxt.bybit({
             'enableRateLimit': True,
-            'timeout': 10000,
+            'timeout': 15000,  # 15 second timeout
             'options': {'defaultType': 'spot'}
         })
 
+        # Binance - Available for fallback if needed
         self.binance = ccxt.binance({
             'enableRateLimit': True,
-            'timeout': 10000,
+            'timeout': 15000,
             'options': {'defaultType': 'spot'}
         })
 
-    @retry(stop=stop_after_attempt(3), wait=wait_fixed(2))
-    def fetch_batch_prices_bybit(self, symbols: List[str]) -> Dict[str, dict]:
-        """Fetch prices from Bybit"""
+        logger.info("PriceFetcher initialized (Bybit + Binance)")
+
+    def test_connection(self) -> dict:
+        """Test API connections - used by /test command"""
+        results = {
+            'bybit': {'status': 'unknown', 'price': None},
+            'binance': {'status': 'unknown', 'price': None}
+        }
+
+        # Test Bybit
         try:
-            tickers = self.bybit.fetch_tickers(symbols)
-            results = {}
-
-            for symbol, ticker in tickers.items():
-                if ticker['last'] and ticker['quoteVolume']:
-                    results[symbol] = {
-                        'price': float(ticker['last']),
-                        'volume_24h': float(ticker['quoteVolume']),
-                        'source': 'bybit'
-                    }
-
-            logger.debug(f"Bybit: Fetched {len(results)}/{len(symbols)} prices")
-            return results
-
+            ticker = self.bybit.fetch_ticker('BTC/USDT')
+            if ticker and ticker.get('last'):
+                results['bybit'] = {
+                    'status': 'online',
+                    'price': float(ticker['last'])
+                }
         except Exception as e:
-            logger.error(f"Bybit fetch failed: {e}")
-            raise
+            results['bybit'] = {'status': 'error', 'error': str(e)}
 
-    @retry(stop=stop_after_attempt(3), wait=wait_fixed(2))
-    def fetch_batch_prices_binance(self, symbols: List[str]) -> Dict[str, dict]:
-        """Fetch prices from Binance (fallback)"""
+        # Test Binance
         try:
-            tickers = self.binance.fetch_tickers(symbols)
-            results = {}
-
-            for symbol, ticker in tickers.items():
-                if ticker['last'] and ticker['quoteVolume']:
-                    results[symbol] = {
-                        'price': float(ticker['last']),
-                        'volume_24h': float(ticker['quoteVolume']),
-                        'source': 'binance'
-                    }
-
-            logger.debug(f"Binance: Fetched {len(results)}/{len(symbols)} prices")
-            return results
-
+            ticker = self.binance.fetch_ticker('BTC/USDT')
+            if ticker and ticker.get('last'):
+                results['binance'] = {
+                    'status': 'online',
+                    'price': float(ticker['last'])
+                }
         except Exception as e:
-            logger.error(f"Binance fetch failed: {e}")
-            raise
+            results['binance'] = {'status': 'error', 'error': str(e)}
 
-    def fetch_batch_prices(self, symbols: List[str]) -> Dict[str, dict]:
-        """
-        Fetch prices with automatic fallback
-        Primary: Bybit → Fallback: Binance
-        """
-        # Try Bybit first
-        try:
-            return self.fetch_batch_prices_bybit(symbols)
-        except Exception as e:
-            logger.warning(f"Bybit failed: {e}, trying Binance...")
-
-        # Fallback to Binance
-        try:
-            return self.fetch_batch_prices_binance(symbols)
-        except Exception as e:
-            logger.error(f"Both APIs failed for batch: {e}")
-            return {}
-
-    def fetch_single_price(self, symbol: str) -> Dict[str, any]:
-        """
-        Fetch single symbol price (for testing/admin commands)
-        """
-        return self.fetch_batch_prices([symbol]).get(symbol, {})
+        return results
