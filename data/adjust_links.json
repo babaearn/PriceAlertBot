@@ -1,0 +1,86 @@
+[
+  {
+    "symbol": "BTC/USDT",
+    "adjust_link": "https://mudrex.go.link/1Yogo"
+  },
+  {
+    "symbol": "ETH/USDT",
+    "adjust_link": "https://mudrex.go.link/kmYNX"
+  },
+  {
+    "symbol": "BNB/USDT",
+    "adjust_link": "https://mudrex.go.link/3G8Mh"
+  },
+  {
+    "symbol": "SOL/USDT",
+    "adjust_link": "https://mudrex.go.link/g6445"
+  },
+  {
+    "symbol": "XRP/USDT",
+    "adjust_link": "https://mudrex.go.link/h6Nof"
+  },
+  {
+    "symbol": "DOGE/USDT",
+    "adjust_link": "https://mudrex.go.link/8BuD2"
+  },
+  {
+    "symbol": "ADA/USDT",
+    "adjust_link": "https://mudrex.go.link/hKGmX"
+  },
+  {
+    "symbol": "AVAX/USDT",
+    "adjust_link": "https://mudrex.go.link/dZEy1"
+  },
+  {
+    "symbol": "DOT/USDT",
+    "adjust_link": "https://mudrex.go.link/DOT123"
+  },
+  {
+    "symbol": "MATIC/USDT",
+    "adjust_link": "https://mudrex.go.link/MATIC123"
+  },
+  {
+    "symbol": "UNI/USDT",
+    "adjust_link": "https://mudrex.go.link/UNI123"
+  },
+  {
+    "symbol": "LINK/USDT",
+    "adjust_link": "https://mudrex.go.link/LINK123"
+  },
+  {
+    "symbol": "ATOM/USDT",
+    "adjust_link": "https://mudrex.go.link/ATOM123"
+  },
+  {
+    "symbol": "LTC/USDT",
+    "adjust_link": "https://mudrex.go.link/LTC123"
+  },
+  {
+    "symbol": "BCH/USDT",
+    "adjust_link": "https://mudrex.go.link/BCH123"
+  },
+  {
+    "symbol": "NEAR/USDT",
+    "adjust_link": "https://mudrex.go.link/NEAR123"
+  },
+  {
+    "symbol": "ALGO/USDT",
+    "adjust_link": "https://mudrex.go.link/ALGO123"
+  },
+  {
+    "symbol": "VET/USDT",
+    "adjust_link": "https://mudrex.go.link/VET123"
+  },
+  {
+    "symbol": "ICP/USDT",
+    "adjust_link": "https://mudrex.go.link/ICP123"
+  },
+  {
+    "symbol": "FIL/USDT",
+    "adjust_link": "https://mudrex.go.link/FIL123"
+  },
+  {
+    "symbol": "ELSA/USDT",
+    "adjust_link": "https://mudrex.go.link/ELSA"
+  }
+]
