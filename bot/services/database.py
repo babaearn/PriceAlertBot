@@ -185,6 +185,31 @@ def check_alert_fired(symbol: str, threshold_percent: float, session_date: date)
         conn.close()
 
 
+def ensure_pair_exists(symbol: str, adjust_link: str = ''):
+    """
+    Ensure pair exists in active_pairs table (for native Bybit mode)
+    Inserts with fallback link if not found
+    """
+    conn = get_connection()
+    try:
+        with conn.cursor() as cur:
+            # Use fallback gainer link if no specific link provided
+            if not adjust_link:
+                adjust_link = 'https://mudrex.go.link/FuturesGainer'
+
+            cur.execute("""
+                INSERT INTO active_pairs (symbol, adjust_link, added_by, status)
+                VALUES (%s, %s, 'auto_bybit', 'active')
+                ON CONFLICT (symbol) DO NOTHING
+            """, (symbol, adjust_link))
+            conn.commit()
+    except Exception as e:
+        conn.rollback()
+        logger.error(f"Failed to ensure pair exists for {symbol}: {e}")
+    finally:
+        conn.close()
+
+
 def log_alert(symbol: str, threshold_percent: float, trigger_price: float,
               session_start_price: float, actual_change_percent: float,
               volume_24h: float, telegram_message_id: Optional[int],
@@ -192,6 +217,9 @@ def log_alert(symbol: str, threshold_percent: float, trigger_price: float,
     """Log fired alert to database"""
     conn = get_connection()
     try:
+        # CRITICAL: Ensure pair exists in active_pairs to prevent foreign key violations
+        ensure_pair_exists(symbol)
+
         alert_type = 'gainer' if actual_change_percent > 0 else 'loser'
 
         with conn.cursor() as cur:
