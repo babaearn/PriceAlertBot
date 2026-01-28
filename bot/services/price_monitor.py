@@ -8,6 +8,7 @@ import time
 import logging
 from datetime import datetime
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
+from apscheduler.events import EVENT_JOB_ERROR, EVENT_JOB_EXECUTED
 from bot.services.price_fetcher import PriceFetcher
 from bot.services.session_manager import SessionManager
 from bot.services.database import log_scan_cycle
@@ -27,7 +28,21 @@ class PriceMonitor:
         self.bot = bot_instance
         self.fetcher = PriceFetcher()
         self.session_manager = SessionManager()
-        self.scheduler = AsyncIOScheduler()
+
+        # Configure scheduler with error handling
+        job_defaults = {
+            'coalesce': False,  # Run all missed executions
+            'max_instances': 3,  # Allow up to 3 concurrent instances
+            'misfire_grace_time': 60  # Jobs can be 60s late
+        }
+        self.scheduler = AsyncIOScheduler(job_defaults=job_defaults)
+
+        # Add error listener
+        self.scheduler.add_listener(
+            self._job_error_listener,
+            EVENT_JOB_ERROR | EVENT_JOB_EXECUTED
+        )
+
         self.scan_count = 0
         self.is_running = True
 
@@ -39,6 +54,20 @@ class PriceMonitor:
             'duration': 0,
             'last_scan_time': None
         }
+
+    def _job_error_listener(self, event):
+        """
+        Listen for job errors and log them WITHOUT crashing the scheduler
+        This prevents the hourly log writer from crashing the entire bot
+        """
+        if event.exception:
+            logger.error(f"⚠️ Scheduler job error: {event.job_id}")
+            logger.error(f"   Exception: {event.exception}")
+            import traceback
+            logger.error(f"   Traceback: {event.traceback}")
+            logger.error("⚠️ Job failed but scheduler continues running")
+        else:
+            logger.debug(f"✅ Job executed successfully: {event.job_id}")
 
     async def scan_prices(self):
         """
@@ -182,10 +211,13 @@ class PriceMonitor:
             logger.error(f"Failed to send alert for {symbol}: {e}")
             return None
 
-    async def write_logs_hourly(self):
-        """Write logs to logs.md file every hour for debugging"""
+    def write_logs_hourly(self):
+        """
+        Write logs to logs.md file every hour for debugging
+        IMPORTANT: This is SYNCHRONOUS to work with APScheduler
+        """
         try:
-            from bot.services.log_writer import write_logs_to_file
+            from bot.services.log_writer import write_logs_to_file_sync
 
             scan_stats = {
                 'total_scans': self.scan_count,
@@ -194,11 +226,14 @@ class PriceMonitor:
                 **self.last_scan_stats
             }
 
-            await write_logs_to_file(scan_stats)
+            write_logs_to_file_sync(scan_stats)
             logger.info("📝 Hourly logs written to logs.md")
 
         except Exception as e:
-            logger.error(f"Failed to write hourly logs: {e}")
+            logger.error(f"❌ CRITICAL: Hourly log write failed: {e}")
+            import traceback
+            logger.error(traceback.format_exc())
+            # Don't crash - this is non-critical
 
     def start(self):
         """Start the monitoring scheduler"""

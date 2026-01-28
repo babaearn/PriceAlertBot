@@ -45,9 +45,9 @@ def install_log_capture():
         logger.error(f"Failed to install log capture: {e}")
 
 
-async def write_logs_to_file(scan_stats: Dict = None):
+def write_logs_to_file_sync(scan_stats: Dict = None):
     """
-    Write current logs to logs.md in repository root
+    Write current logs to logs.md in repository root (SYNCHRONOUS)
 
     Args:
         scan_stats: Optional dict with scan statistics
@@ -118,6 +118,14 @@ If you see:
 
     except Exception as e:
         logger.error(f"Failed to write logs.md: {e}")
+
+
+async def write_logs_to_file(scan_stats: Dict = None):
+    """
+    Async wrapper for write_logs_to_file_sync
+    For compatibility with async contexts
+    """
+    write_logs_to_file_sync(scan_stats)
 
 
 def get_recent_logs() -> List[str]:
