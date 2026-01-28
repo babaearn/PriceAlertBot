@@ -45,6 +45,12 @@ class SessionManager:
                     clear_session_prices()
                     logger.info("✅ clear_session_prices() completed")
 
+                    # Clear in-memory alert cache for new session
+                    logger.info("🗑️ Starting clear_fired_alerts_cache()...")
+                    from bot.services.alert_checker import clear_fired_alerts_cache
+                    clear_fired_alerts_cache()
+                    logger.info("✅ clear_fired_alerts_cache() completed")
+
                 except Exception as e:
                     logger.error(f"⚠️ Cleanup failed (non-fatal): {e}")
                     import traceback
@@ -151,6 +157,10 @@ async def reset_session_full():
 
         # Clear session prices for today
         clear_session_prices()
+
+        # Clear in-memory alert cache
+        from bot.services.alert_checker import clear_fired_alerts_cache
+        clear_fired_alerts_cache()
 
         # Sync new prices
         synced = await sync_session_prices()

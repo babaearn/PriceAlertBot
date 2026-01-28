@@ -8,6 +8,7 @@ Fallback Links:
 
 from datetime import date
 import logging
+from typing import Set, Tuple
 from bot.services.database import (
     get_session_start_price_native,
     save_session_start_price,
@@ -21,6 +22,17 @@ logger = logging.getLogger(__name__)
 # Fallback Adjust links when specific pair link not found
 FALLBACK_GAINER_LINK = "https://mudrex.go.link/FuturesGainer"
 FALLBACK_LOSER_LINK = "https://mudrex.go.link/TopLosers"
+
+# In-memory cache to prevent duplicate alerts within same session
+# Format: Set of (symbol, threshold, date) tuples
+_fired_alerts_cache: Set[Tuple[str, int, date]] = set()
+
+
+def clear_fired_alerts_cache():
+    """Clear in-memory alert cache (called on session reset)"""
+    global _fired_alerts_cache
+    _fired_alerts_cache = set()
+    logger.info("🗑️ Cleared fired alerts cache")
 
 
 async def check_and_fire_alerts_with_ai(pair_data: dict, send_alert_callback) -> int:
@@ -86,9 +98,19 @@ async def check_and_fire_alerts_with_ai(pair_data: dict, send_alert_callback) ->
     today = date.today()
 
     for threshold in thresholds_crossed:
-        # Skip if already fired today
+        # Create cache key
+        cache_key = (symbol, threshold, today)
+
+        # FAST CHECK: In-memory cache (prevents rapid duplicates)
+        if cache_key in _fired_alerts_cache:
+            logger.debug(f"⏭️ {symbol}: Already fired {threshold}% (cached)")
+            continue
+
+        # SLOW CHECK: Database (persistent across restarts)
         if check_alert_fired(symbol, threshold, today):
-            logger.debug(f"⏭️ {symbol}: Already fired {threshold}% today")
+            logger.debug(f"⏭️ {symbol}: Already fired {threshold}% (DB)")
+            # Add to cache so we don't check DB again
+            _fired_alerts_cache.add(cache_key)
             continue
 
         # AI: Find Adjust link (with caching)
@@ -107,6 +129,9 @@ async def check_and_fire_alerts_with_ai(pair_data: dict, send_alert_callback) ->
                 logger.info(f"🔗 {symbol}: Using fallback loser link ({change_percent:.2f}%)")
 
         try:
+            # CRITICAL: Add to cache IMMEDIATELY to prevent duplicates in next scan
+            _fired_alerts_cache.add(cache_key)
+
             # Send alert
             logger.info(f"🚀 FIRING ALERT: {symbol} {change_percent:+.1f}% (threshold: {threshold}%)")
             message_id = await send_alert_callback(
@@ -117,7 +142,7 @@ async def check_and_fire_alerts_with_ai(pair_data: dict, send_alert_callback) ->
                 adjust_link=adjust_link
             )
 
-            # Log to database
+            # Log to database (for persistence)
             log_alert(
                 symbol=symbol,
                 threshold_percent=threshold,
@@ -134,5 +159,7 @@ async def check_and_fire_alerts_with_ai(pair_data: dict, send_alert_callback) ->
 
         except Exception as e:
             logger.error(f"❌ Alert failed for {symbol}: {e}")
+            # Remove from cache if send failed
+            _fired_alerts_cache.discard(cache_key)
 
     return alerts_fired
