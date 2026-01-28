@@ -25,23 +25,44 @@ class SessionManager:
         Check if we need to reset the session (new day)
         Called during each scan cycle
         """
-        current_date = datetime.utcnow().date()
+        try:
+            current_date = datetime.utcnow().date()
+            current_time = datetime.utcnow()
 
-        # First run or new day detected
-        if self.last_reset_date != current_date:
-            logger.info(f"🔄 Session reset: {current_date}")
+            logger.debug(f"Session check: current_date={current_date}, last_reset={self.last_reset_date}, UTC time={current_time}")
 
-            # Cleanup old data (25+ hours old)
-            try:
-                cleanup_old_data()
-                clear_session_prices()
-            except Exception as e:
-                logger.error(f"Cleanup failed: {e}")
+            # First run or new day detected
+            if self.last_reset_date != current_date:
+                logger.info(f"🔄 Session reset triggered: {current_date} (was: {self.last_reset_date})")
 
-            self.last_reset_date = current_date
-            return True
+                # Cleanup old data (25+ hours old)
+                try:
+                    logger.info("🗑️ Starting cleanup_old_data()...")
+                    cleanup_old_data()
+                    logger.info("✅ cleanup_old_data() completed")
 
-        return False
+                    logger.info("🗑️ Starting clear_session_prices()...")
+                    clear_session_prices()
+                    logger.info("✅ clear_session_prices() completed")
+
+                except Exception as e:
+                    logger.error(f"⚠️ Cleanup failed (non-fatal): {e}")
+                    import traceback
+                    logger.error(traceback.format_exc())
+                    # Don't crash - continue even if cleanup fails
+
+                self.last_reset_date = current_date
+                logger.info(f"✅ Session reset complete for {current_date}")
+                return True
+
+            return False
+
+        except Exception as e:
+            logger.error(f"❌ CRITICAL: Session reset check failed: {e}")
+            import traceback
+            logger.error(traceback.format_exc())
+            # Don't crash - return False and continue
+            return False
 
     def is_new_session(self) -> bool:
         """Check if current session is new"""

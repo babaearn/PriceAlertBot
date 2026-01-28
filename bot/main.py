@@ -66,7 +66,7 @@ async def post_init(application: Application):
 
 
 def main():
-    """Main entry point"""
+    """Main entry point with crash protection"""
     try:
         # Initialize database schema (creates tables if not exist)
         logger.info("📦 Initializing database...")
@@ -117,10 +117,16 @@ def main():
 
         # Start the bot
         logger.info("🤖 Starting Telegram bot...")
+        logger.info("⚠️ CRASH PROTECTION ENABLED: Bot will recover from scan errors")
         application.run_polling(allowed_updates=["message", "callback_query"])
 
+    except KeyboardInterrupt:
+        logger.info("🛑 Bot stopped by user")
+        sys.exit(0)
     except Exception as e:
-        logger.error(f"❌ Bot startup failed: {e}")
+        logger.error(f"❌ FATAL: Bot startup/runtime error: {e}")
+        import traceback
+        logger.error(traceback.format_exc())
         sys.exit(1)
 
 

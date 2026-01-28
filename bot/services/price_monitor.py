@@ -53,9 +53,15 @@ class PriceMonitor:
         self.scan_count += 1
 
         try:
-            # Check for daily session reset (00:00 UTC)
-            if self.session_manager.check_and_reset_session():
-                logger.info("Daily session reset complete")
+            # Check for daily session reset (00:00 UTC) - NEVER crash the scanner
+            try:
+                if self.session_manager.check_and_reset_session():
+                    logger.info("✅ Daily session reset complete")
+            except Exception as reset_error:
+                logger.error(f"⚠️ Session reset failed (non-fatal, continuing scan): {reset_error}")
+                import traceback
+                logger.error(traceback.format_exc())
+                # Continue scanning even if reset fails
 
             logger.info(f"Scan #{self.scan_count}: Fetching ALL Bybit pairs...")
 
@@ -131,9 +137,21 @@ class PriceMonitor:
             }
 
         except Exception as e:
-            logger.error(f"Scan error: {e}")
+            logger.error(f"❌ CRITICAL: Scan error (recovering): {e}")
             import traceback
             logger.error(traceback.format_exc())
+
+            # Update stats to show error
+            self.last_scan_stats = {
+                'pairs_checked': 0,
+                'alerts_fired': 0,
+                'errors': 1,
+                'duration': time.time() - start_time,
+                'last_scan_time': datetime.utcnow().strftime('%Y-%m-%d %H:%M:%S UTC')
+            }
+
+            # CRITICAL: Do NOT crash - just log and continue to next scan
+            logger.info("⚠️ Scan failed but scheduler will retry in next interval")
 
     async def send_alert(self, symbol, current_price, session_start_price,
                          change_percent, adjust_link):
