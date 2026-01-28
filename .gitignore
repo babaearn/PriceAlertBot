@@ -41,6 +41,7 @@ wheels/
 *.log
 logs/
 scanner_bot.log
+logs.md
 
 # Database
 *.db

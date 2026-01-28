@@ -6,6 +6,7 @@ Monitors ALL Bybit USDT pairs directly - NO database pair filtering
 import asyncio
 import time
 import logging
+from datetime import datetime
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from bot.services.price_fetcher import PriceFetcher
 from bot.services.session_manager import SessionManager
@@ -29,6 +30,15 @@ class PriceMonitor:
         self.scheduler = AsyncIOScheduler()
         self.scan_count = 0
         self.is_running = True
+
+        # Statistics for logs.md
+        self.last_scan_stats = {
+            'pairs_checked': 0,
+            'alerts_fired': 0,
+            'errors': 0,
+            'duration': 0,
+            'last_scan_time': None
+        }
 
     async def scan_prices(self):
         """
@@ -111,6 +121,15 @@ class PriceMonitor:
                 f"{errors} errors, {duration:.2f}s"
             )
 
+            # Update statistics for logs.md
+            self.last_scan_stats = {
+                'pairs_checked': total_checked,
+                'alerts_fired': total_alerts,
+                'errors': errors,
+                'duration': duration,
+                'last_scan_time': datetime.utcnow().strftime('%Y-%m-%d %H:%M:%S UTC')
+            }
+
         except Exception as e:
             logger.error(f"Scan error: {e}")
             import traceback
@@ -145,8 +164,34 @@ class PriceMonitor:
             logger.error(f"Failed to send alert for {symbol}: {e}")
             return None
 
+    async def write_logs_hourly(self):
+        """Write logs to logs.md file every hour for debugging"""
+        try:
+            from bot.services.log_writer import write_logs_to_file
+
+            scan_stats = {
+                'total_scans': self.scan_count,
+                'scan_interval': SCAN_INTERVAL,
+                'running': self.is_running,
+                **self.last_scan_stats
+            }
+
+            await write_logs_to_file(scan_stats)
+            logger.info("📝 Hourly logs written to logs.md")
+
+        except Exception as e:
+            logger.error(f"Failed to write hourly logs: {e}")
+
     def start(self):
         """Start the monitoring scheduler"""
+        # Install log capture on first start
+        try:
+            from bot.services.log_writer import install_log_capture
+            install_log_capture()
+        except Exception as e:
+            logger.warning(f"Could not install log capture: {e}")
+
+        # Schedule price scanning
         self.scheduler.add_job(
             self.scan_prices,
             'interval',
@@ -154,8 +199,19 @@ class PriceMonitor:
             id='price_scanner',
             replace_existing=True
         )
+
+        # Schedule hourly log writing
+        self.scheduler.add_job(
+            self.write_logs_hourly,
+            'interval',
+            hours=1,
+            id='log_writer',
+            replace_existing=True
+        )
+
         self.scheduler.start()
         logger.info(f"Price monitor started ({SCAN_INTERVAL}s interval) - Native Bybit Mode")
+        logger.info("📝 Hourly log writer enabled (logs.md will update every hour)")
 
     def pause(self):
         """Pause scanning"""

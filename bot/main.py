@@ -113,6 +113,7 @@ def main():
         # Stats commands
         application.add_handler(CommandHandler("stats", stats_commands.stats_command))
         application.add_handler(CommandHandler("listpairs", stats_commands.listpairs_command))
+        application.add_handler(CommandHandler("logs", stats_commands.logs_command))
 
         # Start the bot
         logger.info("🤖 Starting Telegram bot...")

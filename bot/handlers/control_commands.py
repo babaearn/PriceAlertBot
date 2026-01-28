@@ -51,6 +51,7 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
 /help - Show this help
 /status - Check scanner status
 /stats - View statistics
+/logs - View recent deployment logs
 /test - Health check all services
 """
 
