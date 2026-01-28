@@ -1,5 +1,9 @@
 """
 Alert Checking Logic - Threshold Detection with AI Link Finding
+
+Fallback Links:
+- Gainers (when no specific link found): https://mudrex.go.link/FuturesGainer
+- Losers (when no specific link found): https://mudrex.go.link/TopLosers
 """
 
 from datetime import date
@@ -13,6 +17,10 @@ from bot.services.database import (
 from bot.config import GAINER_THRESHOLDS, LOSER_THRESHOLDS, MIN_VOLUME_24H
 
 logger = logging.getLogger(__name__)
+
+# Fallback Adjust links when specific pair link not found
+FALLBACK_GAINER_LINK = "https://mudrex.go.link/FuturesGainer"
+FALLBACK_LOSER_LINK = "https://mudrex.go.link/TopLosers"
 
 
 async def check_and_fire_alerts_with_ai(pair_data: dict, send_alert_callback) -> int:
@@ -87,9 +95,16 @@ async def check_and_fire_alerts_with_ai(pair_data: dict, send_alert_callback) ->
         from bot.services.adjust_link_finder import find_adjust_link_with_ai
         adjust_link = await find_adjust_link_with_ai(symbol)
 
+        # Fallback to generic links if no specific link found
         if not adjust_link:
-            logger.warning(f"⚠️ {symbol}: No Adjust link found - skipping alert")
-            continue
+            if change_percent > 0:
+                # Gainer - use FuturesGainer link
+                adjust_link = FALLBACK_GAINER_LINK
+                logger.info(f"🔗 {symbol}: Using fallback gainer link (+{change_percent:.2f}%)")
+            else:
+                # Loser - use TopLosers link
+                adjust_link = FALLBACK_LOSER_LINK
+                logger.info(f"🔗 {symbol}: Using fallback loser link ({change_percent:.2f}%)")
 
         try:
             # Send alert
